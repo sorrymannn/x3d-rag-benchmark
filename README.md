@@ -118,9 +118,9 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-> **Windows 참고**: `faiss-cpu`는 pip로 바로 설치됩니다. Visual Studio 빌드 불필요.
+> **Note for Windows**: `faiss-cpu` installs directly via pip. No Visual Studio build required.
 
-### 3. ollama + LLM model (RAG TTFT 측정 시에만 필요)
+### 3. ollama + LLM model (only needed for RAG TTFT)
 
 **Linux:**
 ```bash
@@ -130,11 +130,11 @@ ollama pull llama3.2
 
 **Windows:**
 ```powershell
-# https://ollama.com/download 에서 설치 후
+# Download and install from https://ollama.com/download
 ollama pull llama3.2
 ```
 
-> RAG TTFT는 선택사항입니다. Vector Search 벤치마크는 ollama 없이 동작합니다.
+> RAG TTFT measurement is optional. Vector Search benchmark runs without ollama.
 
 ---
 
@@ -142,13 +142,13 @@ ollama pull llama3.2
 
 **Linux / macOS:**
 ```bash
-# Vector Search only (ollama 불필요, ~30-45분)
+# Vector Search only (no ollama needed, ~30-45 min)
 python3 benchmark.py --skip-rag --output 9800x3d.json
 
 # Full benchmark (Vector Search + RAG TTFT)
 python3 benchmark.py --output 9800x3d.json
 
-# Quick test (~5분)
+# Quick test (~5 min)
 python3 benchmark.py --quick --skip-rag
 ```
 
@@ -195,7 +195,7 @@ python3 compare.py 9700x.json 9800x3d.json
 python compare.py 9700x.json 9800x3d.json
 ```
 
-→ `comparison.png` 생성
+Outputs `comparison.png`.
 
 ### Chart contents
 - **Vector Search QPS** — bar chart with error bars by DB size
@@ -231,7 +231,7 @@ python benchmark.py --output 9700x.json
 python benchmark.py --output 9800x3d.json
 ```
 
-> 임베딩 캐시는 OS에 관계없이 호환됩니다 (numpy `.npy` 파일).
+> Embedding cache is cross-platform compatible (numpy `.npy` files).
 
 ---
 
