@@ -39,7 +39,7 @@ X3D V-Cache (96MB L3)의 강점:
 ## 설치
 
 ```bash
-git clone https://github.com/YOUR_ID/x3d-rag-benchmark
+git clone https://github.com/sorrymannn/x3d-rag-benchmark
 cd x3d-rag-benchmark
 pip install -r requirements.txt
 
