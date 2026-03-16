@@ -46,10 +46,25 @@ Vector Search characteristics:
 |---|---|---|
 | Vector Search QPS | FAISS HNSW queries per second | **Direct** |
 | Vector Search P99 Latency | Worst-case search latency | **Direct** |
-| Concurrent Search | Multi-query throughput | **Direct** |
+| Latency Distribution | P50 / P95 / P99 breakdown | **Direct** |
 | RAG TTFT | Time to first token (full pipeline) | Indirect |
 
-Results include **stddev and error bars** when using `--runs` for statistical reliability.
+---
+
+## Methodology
+
+Designed for reproducible, low-variance results:
+
+| Design Choice | Reason |
+|---|---|
+| **Real Wikipedia embeddings** | Clusters by topic → stable HNSW traversal paths vs random vectors |
+| **Single-threaded FAISS** | Eliminates OS scheduler multi-core dispatch noise |
+| **Trimmed mean** (drop top/bottom 5%) | Removes thermal throttle and outlier spikes |
+| **5 runs by default** | Statistical reliability |
+| **Embedding cache** | Same vectors reused across runs and machines |
+
+> **Same CPU should produce CV < 3%** (coefficient of variation).
+> If you see higher variance, increase `--runs`.
 
 ---
 
@@ -87,14 +102,14 @@ ollama pull llama3.2
 # Full benchmark (Vector Search + RAG TTFT)
 python3 benchmark.py
 
-# Recommended: 3 runs averaged for reliable results
-python3 benchmark.py --runs 3 --output 9700x.json
-python3 benchmark.py --runs 3 --output 9800x3d.json
+# Recommended: 5 runs averaged (default)
+python3 benchmark.py --output 9700x.json
+python3 benchmark.py --output 9800x3d.json
 
 # Vector Search only (no ollama needed, ~30-45 min)
 python3 benchmark.py --skip-rag
 
-# Quick test (~3 min)
+# Quick test (~5 min, includes embedding generation on first run)
 python3 benchmark.py --quick --skip-rag
 ```
 
@@ -102,15 +117,15 @@ python3 benchmark.py --quick --skip-rag
 
 | Option | Default | Description |
 |---|---|---|
-| `--runs N` | 1 | Repeat N times and average results (recommended: 3) |
+| `--runs N` | 5 | Number of runs to average |
 | `--skip-rag` | off | Skip RAG TTFT, run Vector Search only |
-| `--quick` | off | Test with small DB only (~3 min) |
+| `--quick` | off | Small DB only, 3 runs |
 | `--output FILE` | auto | Save results to specified JSON file |
 | `--model NAME` | llama3.2 | ollama model for RAG TTFT |
-| `--queries N` | 200 | Number of queries per run |
+| `--queries N` | 300 | Number of queries per run |
+| `--db-size N` | - | Override DB size (single value) |
 | `--cache-dir PATH` | ./embedding_cache | Embedding cache directory |
 | `--rebuild` | off | Force rebuild embedding cache |
-| `--db-size N` | - | Override DB size (single value) |
 
 ---
 
@@ -123,7 +138,28 @@ python3 compare.py 9700x.json 9800x3d.json
 # → outputs comparison.png
 ```
 
-Charts include **error bars** when multiple runs were used.
+### Chart contents
+- **Vector Search QPS** — bar chart with error bars by DB size
+- **Vector Search P99 Latency** — line chart with error bars
+- **Latency Distribution** — P50 / P95 / P99 bar chart (largest DB)
+- **RAG TTFT** — vector search latency inside full RAG pipeline
+
+---
+
+## Sharing Embeddings Between Machines
+
+For a fair comparison, use **identical embedding vectors** on both CPUs.
+
+```bash
+# Generate on first machine
+python3 benchmark.py --output 9700x.json
+
+# Copy cache to second machine
+scp -r ./embedding_cache/ user@9800x3d-machine:~/x3d-rag-benchmark/
+
+# Run on second machine (loads from cache instantly)
+python3 benchmark.py --output 9800x3d.json
+```
 
 ---
 
@@ -134,19 +170,19 @@ Charts include **error bars** when multiple runs were used.
 | FAISS | Meta AI | Vector search engine |
 | sentence-transformers | HuggingFace | Embedding model |
 | ollama | Ollama | Local LLM server |
-| datasets | HuggingFace | Public dataset |
+| datasets | HuggingFace | Wikipedia dataset |
 
 ---
 
-## Reproducibility
+## Reproducibility Conditions
 
-For consistent results across machines:
 - Minimize background processes
 - Reboot before benchmarking (recommended)
 - Use identical RAM capacity and speed
 - Use identical GPU
 - Use identical OS environment
-- Use `--runs 3` or higher for statistical reliability
+- Use `--runs 5` or higher for publication-quality results
+- Share `embedding_cache/` between machines for fair comparison
 
 ---
 
