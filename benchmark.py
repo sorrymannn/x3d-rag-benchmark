@@ -23,7 +23,7 @@ Install:
 
 Run:
   python3 benchmark.py
-  python3 benchmark.py --runs 10            # recommended for publication
+  python3 benchmark.py --runs 5            # recommended for publication
   python3 benchmark.py --skip-rag          # vector search only
   python3 benchmark.py --quick --skip-rag  # fast test
 """
@@ -150,7 +150,7 @@ DEFAULT = {
     "hnsw_m":       32,
     "hnsw_ef":      64,
     "warmup":       30,        # warmup queries (discarded)
-    "runs":         10,         # default 10 runs
+    "runs":         5,         # default 5 runs
     "trim":         0.05,      # trimmed mean: drop top/bottom 5%
     "threads":      0,         # 0 = auto (all cores), 1 = single-threaded
     "rag_queries":  50,
