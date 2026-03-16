@@ -58,13 +58,13 @@ Designed for reproducible, low-variance results:
 | Design Choice | Reason |
 |---|---|
 | **Real Wikipedia embeddings** | Clusters by topic → stable HNSW traversal paths vs random vectors |
-| **Single-threaded FAISS** | Eliminates OS scheduler multi-core dispatch noise |
+| **Configurable FAISS threads** | Default: all cores (auto). Use `--threads 1` if CV > 3% |
 | **Trimmed mean** (drop top/bottom 5%) | Removes thermal throttle and outlier spikes |
 | **5 runs by default** | Statistical reliability |
 | **Embedding cache** | Same vectors reused across runs and machines |
 
 > **Same CPU should produce CV < 3%** (coefficient of variation).
-> If you see higher variance, increase `--runs`.
+> If CV > 3%, try `--threads 1` (single-threaded) or increase `--runs`.
 
 ---
 
@@ -126,6 +126,7 @@ python3 benchmark.py --quick --skip-rag
 | `--db-size N` | - | Override DB size (single value) |
 | `--cache-dir PATH` | ./embedding_cache | Embedding cache directory |
 | `--rebuild` | off | Force rebuild embedding cache |
+| `--threads N` | 0 (auto) | FAISS threads: 0=all cores, 1=single-threaded |
 
 ---
 
