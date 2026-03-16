@@ -11,8 +11,8 @@ Measures:
 Key design decisions:
   - Real Wikipedia embeddings (not random vectors)
     → clusters by topic → stable, reproducible search paths
-  - Single-threaded FAISS search
-    → eliminates OS scheduler variance
+  - Configurable FAISS threads (default: auto)
+    → use --threads 1 for maximum stability if CV > 3%
   - Trimmed mean (drop top/bottom 5%)
     → removes outliers from results
   - Embeddings cached to disk
@@ -74,6 +74,7 @@ DEFAULT = {
     "warmup":       30,        # warmup queries (discarded)
     "runs":         5,         # default 5 runs
     "trim":         0.05,      # trimmed mean: drop top/bottom 5%
+    "threads":      0,         # 0 = auto (all cores), 1 = single-threaded
     "rag_queries":  50,
     "cache_dir":    "./embedding_cache",
     "n_passages":   1_100_000,
@@ -232,8 +233,12 @@ def run_vector_search(db_size, cfg, db_emb, q_emb):
     print(f"\n  DB size: {db_size:,} vectors  |  dim: {dim}  |  runs: {n_runs}")
     print(f"  Est. memory: ~{db_size * dim * 4 / 1024**3:.2f} GB")
 
-    # Single-threaded: eliminates multi-core scheduling noise
-    faiss.omp_set_num_threads(1)
+    # Thread count: 0=auto (all cores), 1=single-threaded (max stability)
+    n_threads = cfg.get("threads", 0)
+    if n_threads > 0:
+        faiss.omp_set_num_threads(n_threads)
+    thread_label = f"{n_threads}" if n_threads > 0 else "auto"
+    print(f"  FAISS threads: {thread_label}")
 
     print("  Building HNSW index...", end=" ", flush=True)
     t0        = time.perf_counter()
@@ -324,7 +329,9 @@ def run_rag_ttft(cfg, embed_model, db_emb, q_emb, passages):
         print(f"  Install: ollama pull {cfg['llm_model']}")
         return None
 
-    faiss.omp_set_num_threads(1)
+    n_threads = cfg.get("threads", 0)
+    if n_threads > 0:
+        faiss.omp_set_num_threads(n_threads)
 
     rag_db_size = min(10_000, len(db_emb))
     vecs = db_emb[:rag_db_size].copy()
@@ -440,6 +447,8 @@ def main():
     parser.add_argument("--cache-dir", default=DEFAULT["cache_dir"])
     parser.add_argument("--rebuild",   action="store_true",
                         help="force rebuild embedding cache")
+    parser.add_argument("--threads",   type=int, default=DEFAULT["threads"],
+                        help="FAISS threads: 0=auto, 1=single (default: 0)")
     args = parser.parse_args()
 
     cfg = DEFAULT.copy()
@@ -447,6 +456,7 @@ def main():
     cfg["n_queries"]  = args.queries
     cfg["runs"]       = max(1, args.runs)
     cfg["cache_dir"]  = args.cache_dir
+    cfg["threads"]    = args.threads
 
     if args.db_size:
         cfg["db_sizes"] = [args.db_size]
@@ -471,7 +481,9 @@ def main():
     print("="*60)
     print(f"  CPU:  {cpu}")
     print(f"  GPU:  {gpu}")
+    thread_str = str(cfg["threads"]) if cfg["threads"] > 0 else "auto"
     print(f"  Runs: {cfg['runs']}  (trimmed mean, drop top/bottom 5%)")
+    print(f"  FAISS threads: {thread_str}  (use --threads 1 if CV > 3%)")
     print(f"  Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
 
@@ -491,7 +503,7 @@ def main():
             "config":         cfg,
             "embedding_type": "real (Wikipedia)",
             "methodology": {
-                "faiss_threads": 1,
+                "faiss_threads": cfg.get("threads", 0),
                 "trimmed_mean":  f"top/bottom {int(cfg['trim']*100)}% dropped",
                 "warmup_queries": cfg["warmup"],
             },
