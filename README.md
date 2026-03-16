@@ -1,137 +1,154 @@
 # x3d-rag-benchmark
 
-**AMD Ryzen X3D V-Cache vs non-X3D — RAG AI 파이프라인 CPU 성능 벤치마크**
+**AMD Ryzen X3D V-Cache vs non-X3D — RAG AI Pipeline CPU Performance Benchmark**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![FAISS](https://img.shields.io/badge/Meta-FAISS-blue.svg)
 ![HuggingFace](https://img.shields.io/badge/HuggingFace-sentence--transformers-orange.svg)
 
-GPU를 함께 사용하는 실제 AI PC 환경에서 CPU(X3D vs non-X3D)가
-RAG 파이프라인에 미치는 영향을 측정하는 오픈소스 벤치마크입니다.
+An open-source benchmark measuring the impact of CPU (X3D vs non-X3D) on RAG AI pipelines
+in real AI PC environments where GPU is also in use.
 
 ---
 
-## 왜 X3D가 RAG에서 유리한가
+## Why X3D Has an Advantage in RAG
 
-RAG 파이프라인에서 CPU가 담당하는 Vector Search는
-Random Memory Access Pattern이 핵심 병목입니다.
-X3D V-Cache의 대용량 L3 캐시(96MB)는 이 workload에서
-게임과 동일한 메커니즘으로 성능 이점을 제공합니다.
+Vector Search — the CPU's core task in RAG pipelines — is bottlenecked by
+Random Memory Access Pattern. X3D V-Cache's large L3 cache (96MB) provides
+a performance advantage through the same mechanism that makes it strong in gaming.
 
 ```
-RAG 파이프라인 구조:
+RAG Pipeline:
 
-  사용자 질문
+  User query
       ↓
-  임베딩 생성        (GPU)
+  Embedding generation   (GPU)
       ↓
-  Vector Search      (CPU) ← X3D V-Cache 효과 발생 구간
+  Vector Search          (CPU) ← X3D V-Cache effect
       ↓
-  LLM 생성           (GPU)
+  LLM generation         (GPU)
       ↓
-  응답
+  Response
 
-Vector Search 특성:
-  - HNSW 그래프를 랜덤하게 탐색
-  - 매 탐색마다 다른 메모리 주소 접근 (Random Access)
-  - L3 캐시가 클수록 캐시 히트율 증가 → 레이턴시 감소
-  - 96MB V-Cache = 게임에서 X3D가 강한 이유와 동일한 메커니즘
+Vector Search characteristics:
+  - Randomly traverses HNSW graph nodes
+  - Each traversal accesses a different memory address (Random Access)
+  - Larger L3 cache → higher cache hit rate → lower latency
+  - 96MB V-Cache = same mechanism as X3D dominance in gaming
 ```
 
 ---
 
-## 측정 항목
+## What We Measure
 
-| 항목 | 설명 | X3D 영향 |
+| Metric | Description | X3D Impact |
 |---|---|---|
-| Vector Search QPS | FAISS HNSW 초당 쿼리 수 | **직접적** |
-| Vector Search P99 Latency | 최악의 경우 검색 레이턴시 | **직접적** |
-| Concurrent Search | 동시 요청 처리 성능 | **직접적** |
-| RAG TTFT | 첫 토큰까지 전체 시간 | 간접적 |
+| Vector Search QPS | FAISS HNSW queries per second | **Direct** |
+| Vector Search P99 Latency | Worst-case search latency | **Direct** |
+| Concurrent Search | Multi-query throughput | **Direct** |
+| RAG TTFT | Time to first token (full pipeline) | Indirect |
+
+Results include **stddev and error bars** when using `--runs` for statistical reliability.
 
 ---
 
-## 설치
+## Installation
 
-### 1. 레포 클론
+### 1. Clone
 ```bash
 git clone https://github.com/sorrymannn/x3d-rag-benchmark
 cd x3d-rag-benchmark
 ```
 
-### 2. Python 패키지 설치
+### 2. Python packages
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. ollama 설치 및 모델 다운로드
+### 3. ollama + LLM model (for RAG TTFT only)
 ```bash
-# ollama 설치 (없는 경우)
+# Install ollama
 curl -fsSL https://ollama.com/install.sh | sh
 
-# LLM 모델 다운로드
+# Pull LLM model
 ollama pull llama3.2
 ```
 
-> RAG TTFT 측정이 필요 없다면 ollama 없이도 실행 가능합니다.
+> RAG TTFT measurement is optional. Vector Search benchmark runs without ollama.
 
 ---
 
-## 실행
+## Usage
 
 ```bash
-# 전체 벤치마크 (Vector Search + RAG TTFT)
+# Full benchmark (Vector Search + RAG TTFT)
 python3 benchmark.py
 
-# Vector Search만 (ollama 불필요, 약 30~45분)
+# Recommended: 3 runs averaged for reliable results
+python3 benchmark.py --runs 3 --output 9700x.json
+python3 benchmark.py --runs 3 --output 9800x3d.json
+
+# Vector Search only (no ollama needed, ~30-45 min)
 python3 benchmark.py --skip-rag
 
-# 빠른 테스트 (약 3분)
+# Quick test (~3 min)
 python3 benchmark.py --quick --skip-rag
-
-# 결과 파일 지정
-python3 benchmark.py --output 9700x.json
-python3 benchmark.py --output 9800x3d.json
 ```
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `--runs N` | 1 | Repeat N times and average results (recommended: 3) |
+| `--skip-rag` | off | Skip RAG TTFT, run Vector Search only |
+| `--quick` | off | Test with small DB only (~3 min) |
+| `--output FILE` | auto | Save results to specified JSON file |
+| `--model NAME` | llama3.2 | ollama model for RAG TTFT |
+| `--queries N` | 200 | Number of queries per run |
+| `--db-size N` | - | Override DB size (single value) |
 
 ---
 
-## 결과 비교 그래프
+## Compare Results
 
-두 CPU의 결과 JSON을 비교해서 그래프로 출력합니다.
+Generate comparison charts from two JSON result files.
 
 ```bash
 python3 compare.py 9700x.json 9800x3d.json
-# → comparison.png 자동 생성
+# → outputs comparison.png
 ```
 
+Charts include **error bars** when multiple runs were used.
+
 ---
 
-## 사용 라이브러리
+## Libraries Used
 
-| 라이브러리 | 출처 | 용도 |
+| Library | Source | Purpose |
 |---|---|---|
-| FAISS | Meta AI | 벡터 검색 엔진 |
-| sentence-transformers | HuggingFace | 임베딩 모델 |
-| ollama | Ollama | 로컬 LLM 서버 |
-| datasets | HuggingFace | 공개 데이터셋 |
+| FAISS | Meta AI | Vector search engine |
+| sentence-transformers | HuggingFace | Embedding model |
+| ollama | Ollama | Local LLM server |
+| datasets | HuggingFace | Public dataset |
 
 ---
 
-## 재현 가능한 결과를 위한 측정 조건
+## Reproducibility
 
-- 백그라운드 프로세스 최소화
-- 벤치마크 전 시스템 재시작 권장
-- 동일한 RAM 용량 / 속도 사용
-- 동일한 GPU 사용
-- 동일한 운영체제 환경
+For consistent results across machines:
+- Minimize background processes
+- Reboot before benchmarking (recommended)
+- Use identical RAM capacity and speed
+- Use identical GPU
+- Use identical OS environment
+- Use `--runs 3` or higher for statistical reliability
 
 ---
 
-## 기여
+## Contributing
 
-PR과 이슈 환영합니다.
-다른 CPU로 측정한 결과는 `results/` 폴더에 PR 주시면 추가합니다.
+PRs and issues welcome.
+Submit your results (JSON files) to the `results/` folder via PR.
