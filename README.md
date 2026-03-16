@@ -143,10 +143,10 @@ ollama pull llama3.2
 **Linux / macOS:**
 ```bash
 # Vector Search only (no ollama needed, ~30-45 min)
-python3 benchmark.py --skip-rag --output 9800x3d.json
+python3 benchmark.py --skip-rag --output 9800x3d.json  # use your CPU name
 
 # Full benchmark (Vector Search + RAG TTFT)
-python3 benchmark.py --output 9800x3d.json
+python3 benchmark.py --output 9800x3d.json  # use your CPU name
 
 # Quick test (~5 min)
 python3 benchmark.py --quick --skip-rag
@@ -155,10 +155,10 @@ python3 benchmark.py --quick --skip-rag
 **Windows:**
 ```powershell
 # Vector Search only
-python benchmark.py --skip-rag --output 9800x3d.json
+python benchmark.py --skip-rag --output 9800x3d.json  # use your CPU name
 
 # Full benchmark
-python benchmark.py --output 9800x3d.json
+python benchmark.py --output 9800x3d.json  # use your CPU name
 
 # Quick test
 python benchmark.py --quick --skip-rag
@@ -187,12 +187,12 @@ Generate comparison charts from two JSON result files.
 
 **Linux / macOS:**
 ```bash
-python3 compare.py 9700x.json 9800x3d.json
+python3 compare.py 9700x.json 9800x3d.json  # compare two CPU results
 ```
 
 **Windows:**
 ```powershell
-python compare.py 9700x.json 9800x3d.json
+python compare.py 9700x.json 9800x3d.json  # compare two CPU results
 ```
 
 Outputs `comparison.png`.
@@ -212,23 +212,23 @@ For a fair comparison, use **identical embedding vectors** on both CPUs.
 **Linux → Linux:**
 ```bash
 # Generate on first machine
-python3 benchmark.py --output 9700x.json
+python3 benchmark.py --output 9700x.json  # name after your CPU
 
 # Copy cache to second machine
 scp -r ./embedding_cache/ user@other-machine:~/x3d-rag-benchmark/
 
 # Run on second machine
-python3 benchmark.py --output 9800x3d.json
+python3 benchmark.py --output 9800x3d.json  # name after your CPU
 ```
 
 **Windows → Windows (or cross-platform):**
 ```powershell
 # Generate on first machine
-python benchmark.py --output 9700x.json
+python benchmark.py --output 9700x.json  # name after your CPU
 
 # Copy embedding_cache folder to second machine via USB, network share, etc.
 # Then run on second machine
-python benchmark.py --output 9800x3d.json
+python benchmark.py --output 9800x3d.json  # name after your CPU
 ```
 
 > Embedding cache is cross-platform compatible (numpy `.npy` files).
