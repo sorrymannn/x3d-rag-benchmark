@@ -23,7 +23,7 @@ Install:
 
 Run:
   python3 benchmark.py
-  python3 benchmark.py --runs 5            # recommended for publication
+  python3 benchmark.py --runs 10            # recommended for publication
   python3 benchmark.py --skip-rag          # vector search only
   python3 benchmark.py --quick --skip-rag  # fast test
 """
