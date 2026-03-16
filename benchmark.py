@@ -265,7 +265,7 @@ def run_rag_ttft(cfg, embed_model):
     print("  Loading dataset...", end=" ", flush=True)
     try:
         ds = load_dataset("wikipedia", "20220301.simple",
-                          split="train[:2000]", trust_remote_code=True)
+                          split="train[:2000]", )
         passages = [r["text"][:300] for r in ds]
     except Exception:
         passages = [f"This is passage number {i} about topic {i % 50}."
@@ -296,7 +296,7 @@ def run_rag_ttft(cfg, embed_model):
     ] * (cfg["rag_queries"] // 5 + 1))[:cfg["rag_queries"]]
 
     # warmup
-    for q in queries[:5]:
+    for q in queries[:10]:
         q_emb = embed_model.encode([q], convert_to_numpy=True)
         faiss.normalize_L2(q_emb)
         idx.search(q_emb, cfg["top_k"])
