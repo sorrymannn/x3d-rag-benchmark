@@ -150,7 +150,7 @@ DEFAULT = {
     "hnsw_m":       32,
     "hnsw_ef":      64,
     "warmup":       30,        # warmup queries (discarded)
-    "runs":         5,         # default 5 runs
+    "runs":         10,         # default 10 runs
     "trim":         0.05,      # trimmed mean: drop top/bottom 5%
     "threads":      0,         # 0 = auto (all cores), 1 = single-threaded
     "rag_queries":  50,
