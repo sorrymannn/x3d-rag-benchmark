@@ -31,31 +31,63 @@ def load(path):
 
 
 def short_cpu(name):
-    for keyword in ["9800X3D", "9700X", "9800", "9700",
-                    "7800X3D", "7700X", "i9", "i7", "i5"]:
-        if keyword.lower() in name.lower():
-            return keyword
-    return name.split()[3] if len(name.split()) > 3 else name[:20]
+    """
+    Extract model name from full CPU string.
+    e.g. "AMD Ryzen 7 9800X3D 8-Core Processor" -> "9800X3D"
+    """
+    import re
+
+    # AMD X3D: 9800X3D, 9950X3D, 7800X3D, 5800X3D
+    m = re.search(r'(\d{4}X3D)', name, re.IGNORECASE)
+    if m: return m.group(1).upper()
+
+    # AMD Ryzen X-suffix: 9700X, 9900X, 7700X
+    m = re.search(r'(\d{4}X\d*)', name, re.IGNORECASE)
+    if m: return m.group(1).upper()
+
+    # AMD Ryzen number only: 9700, 9900
+    m = re.search(r'Ryzen\s+\d+\s+(\d{4})', name, re.IGNORECASE)
+    if m: return m.group(1)
+
+    # Intel Core: i9-14900K, i7-13700K
+    m = re.search(r'(i\d-\d{4,5}\w*)', name, re.IGNORECASE)
+    if m: return m.group(1)
+
+    # Intel Ultra: Ultra 9 285K, Ultra 7 265K
+    m = re.search(r'Ultra\s+(\d+\s+\d+\w*)', name, re.IGNORECASE)
+    if m: return f"Ultra {m.group(1)}"
+
+    # AMD EPYC / Threadripper: 4585PX, 7763, 3970X
+    m = re.search(r'(?:EPYC|Threadripper)\s+(\w+)', name, re.IGNORECASE)
+    if m: return m.group(1)
+
+    parts = name.split()
+    if len(parts) >= 4: return parts[3]
+    return name[:20]
 
 
 def plot_vector_search(ax, data_a, data_b, label_a, label_b):
-    """Vector Search QPS by DB size"""
+    """Vector Search QPS by DB size with error bars"""
     sizes_a = [r["db_size"] for r in data_a["vector_search"]]
     qps_a   = [r["qps"]     for r in data_a["vector_search"]]
+    err_a   = [r.get("qps_stddev", 0) for r in data_a["vector_search"]]
     sizes_b = [r["db_size"] for r in data_b["vector_search"]]
     qps_b   = [r["qps"]     for r in data_b["vector_search"]]
+    err_b   = [r.get("qps_stddev", 0) for r in data_b["vector_search"]]
 
     x = np.arange(len(sizes_a))
     w = 0.35
 
-    ax.bar(x - w/2, qps_a, w, label=label_a, color=COLOR_A, alpha=0.85)
-    ax.bar(x + w/2, qps_b, w, label=label_b, color=COLOR_B, alpha=0.85)
+    ax.bar(x - w/2, qps_a, w, label=label_a, color=COLOR_A, alpha=0.85,
+           yerr=err_a, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
+    ax.bar(x + w/2, qps_b, w, label=label_b, color=COLOR_B, alpha=0.85,
+           yerr=err_b, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
 
     for i, (qa, qb) in enumerate(zip(qps_a, qps_b)):
         diff = (qb - qa) / qa * 100
         color = COLOR_B if diff > 0 else COLOR_A
         sign = "+" if diff > 0 else ""
-        ax.text(i, max(qa, qb) * 1.05, f"{sign}{diff:.1f}%",
+        ax.text(i, max(qa, qb) * 1.08, f"{sign}{diff:.1f}%",
                 ha="center", va="bottom", color=color,
                 fontsize=9, fontweight="bold")
 
@@ -105,14 +137,19 @@ def plot_concurrent(ax, data_a, data_b, label_a, label_b):
     x = np.arange(len(conc_a))
     w = 0.35
 
-    ax.bar(x - w/2, qps_a, w, label=label_a, color=COLOR_A, alpha=0.85)
-    ax.bar(x + w/2, qps_b, w, label=label_b, color=COLOR_B, alpha=0.85)
+    err_a = [data_a["concurrent_search"][k].get("qps_stddev", 0) for k in conc_a]
+    err_b = [data_b["concurrent_search"][k].get("qps_stddev", 0) for k in conc_b]
+
+    ax.bar(x - w/2, qps_a, w, label=label_a, color=COLOR_A, alpha=0.85,
+           yerr=err_a, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
+    ax.bar(x + w/2, qps_b, w, label=label_b, color=COLOR_B, alpha=0.85,
+           yerr=err_b, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
 
     for i, (qa, qb) in enumerate(zip(qps_a, qps_b)):
         diff = (qb - qa) / qa * 100
         color = COLOR_B if diff > 0 else COLOR_A
         sign = "+" if diff > 0 else ""
-        ax.text(i, max(qa, qb) * 1.05, f"{sign}{diff:.1f}%",
+        ax.text(i, max(qa, qb) * 1.08, f"{sign}{diff:.1f}%",
                 ha="center", va="bottom", color=color,
                 fontsize=9, fontweight="bold")
 
