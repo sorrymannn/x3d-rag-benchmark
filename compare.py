@@ -254,8 +254,9 @@ def main():
 
     fig.text(
         0.5, 0.01,
-        f"CPU A: {da['meta']['cpu']}  |  CPU B: {db['meta']['cpu']}  |  "
-        f"github.com/sorrymannn/x3d-rag-benchmark",
+        f"CPU A: {da['meta']['cpu']}  (L3: {da['meta'].get('l3_cache', '?')})"
+        f"  |  CPU B: {db['meta']['cpu']}  (L3: {db['meta'].get('l3_cache', '?')})"
+        f"  |  github.com/sorrymannn/x3d-rag-benchmark",
         ha="center", color="#888888", fontsize=8
     )
 
