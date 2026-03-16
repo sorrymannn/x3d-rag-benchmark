@@ -1,0 +1,7 @@
+faiss-cpu>=1.7.4
+sentence-transformers>=2.7.0
+ollama>=0.2.0
+datasets>=2.19.0
+numpy>=1.25.0
+matplotlib>=3.8.0
+tqdm>=4.66.0
