@@ -10,15 +10,14 @@ Usage:
 
 import argparse
 import json
-import os
+import re
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
 
 # ── Colors ────────────────────────────────────────────────────────────────────
-COLOR_A = "#E84B4B"   # red (non-X3D)
-COLOR_B = "#4B9BE8"   # blue (X3D)
+COLOR_A = "#E84B4B"
+COLOR_B = "#4B9BE8"
 BG      = "#1A1A2E"
 PANEL   = "#16213E"
 TEXT    = "#E0E0E0"
@@ -31,146 +30,164 @@ def load(path):
 
 
 def short_cpu(name):
-    """
-    Extract model name from full CPU string.
-    e.g. "AMD Ryzen 7 9800X3D 8-Core Processor" -> "9800X3D"
-    """
-    import re
-
-    # AMD X3D: 9800X3D, 9950X3D, 7800X3D, 5800X3D
+    # AMD Ryzen X3D: 9800X3D, 9950X3D, 9850X3D, 7800X3D
     m = re.search(r'(\d{4}X3D)', name, re.IGNORECASE)
     if m: return m.group(1).upper()
 
-    # AMD Ryzen X-suffix: 9700X, 9900X, 7700X
-    m = re.search(r'(\d{4}X\d*)', name, re.IGNORECASE)
+    # AMD Ryzen X suffix: 9700X, 9900X, 7700X, 5600X
+    m = re.search(r'(\d{4}X\b)', name, re.IGNORECASE)
+    if m: return m.group(1).upper()
+
+    # AMD Ryzen XT: 3800XT
+    m = re.search(r'(\d{4}XT\b)', name, re.IGNORECASE)
     if m: return m.group(1).upper()
 
     # AMD Ryzen number only: 9700, 9900
-    m = re.search(r'Ryzen\s+\d+\s+(\d{4})', name, re.IGNORECASE)
+    m = re.search(r'Ryzen\s+\d+\s+(\d{4})\b', name, re.IGNORECASE)
     if m: return m.group(1)
 
-    # Intel Core: i9-14900K, i7-13700K
+    # AMD EPYC: 4585PX, 4564P, 9654
+    m = re.search(r'EPYC\s+(\d{4}\w*)', name, re.IGNORECASE)
+    if m: return f"EPYC {m.group(1).upper()}"
+
+    # AMD Threadripper
+    m = re.search(r'Threadripper\s+(?:PRO\s+)?(\d{4}\w*)', name, re.IGNORECASE)
+    if m: return f"TR {m.group(1).upper()}"
+
+    # Intel Core Ultra: 285K, 265K, 225K
+    m = re.search(r'Ultra\s+(\d+)\s+(\d{3}\w*)', name, re.IGNORECASE)
+    if m: return f"Ultra {m.group(1)} {m.group(2).upper()}"
+
+    # Intel Core i-series: i9-14900K, i7-13700KF
     m = re.search(r'(i\d-\d{4,5}\w*)', name, re.IGNORECASE)
     if m: return m.group(1)
 
-    # Intel Ultra: Ultra 9 285K, Ultra 7 265K
-    m = re.search(r'Ultra\s+(\d+\s+\d+\w*)', name, re.IGNORECASE)
-    if m: return f"Ultra {m.group(1)}"
+    # Intel Xeon
+    m = re.search(r'Xeon\s+(?:W-|Gold\s+|Platinum\s+|Silver\s+)?(\w+)',
+                  name, re.IGNORECASE)
+    if m: return f"Xeon {m.group(1)}"
 
-    # AMD EPYC / Threadripper: 4585PX, 7763, 3970X
-    m = re.search(r'(?:EPYC|Threadripper)\s+(\w+)', name, re.IGNORECASE)
-    if m: return m.group(1)
+    # Fallback
+    m = re.search(r'\b(\d{3,5}[A-Z0-9]*)\b', name, re.IGNORECASE)
+    if m: return m.group(1).upper()
 
     parts = name.split()
-    if len(parts) >= 4: return parts[3]
-    return name[:20]
+    return " ".join(parts[2:4]) if len(parts) >= 4 else name[:20]
 
 
-def plot_vector_search(ax, data_a, data_b, label_a, label_b):
-    """Vector Search QPS by DB size with error bars"""
-    sizes_a = [r["db_size"] for r in data_a["vector_search"]]
-    qps_a   = [r["qps"]     for r in data_a["vector_search"]]
-    err_a   = [r.get("qps_stddev", 0) for r in data_a["vector_search"]]
-    sizes_b = [r["db_size"] for r in data_b["vector_search"]]
-    qps_b   = [r["qps"]     for r in data_b["vector_search"]]
-    err_b   = [r.get("qps_stddev", 0) for r in data_b["vector_search"]]
+def bar_with_err(ax, x, w, vals, errs, color, label):
+    ax.bar(x, vals, w, label=label, color=color, alpha=0.85,
+           yerr=errs,
+           error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
 
-    x = np.arange(len(sizes_a))
-    w = 0.35
 
-    ax.bar(x - w/2, qps_a, w, label=label_a, color=COLOR_A, alpha=0.85,
-           yerr=err_a, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
-    ax.bar(x + w/2, qps_b, w, label=label_b, color=COLOR_B, alpha=0.85,
-           yerr=err_b, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
-
-    for i, (qa, qb) in enumerate(zip(qps_a, qps_b)):
-        diff = (qb - qa) / qa * 100
+def diff_label(ax, i, va, vb, ybase, higher_is_better=True):
+    diff  = (vb - va) / va * 100
+    sign  = "+" if diff > 0 else ""
+    if higher_is_better:
         color = COLOR_B if diff > 0 else COLOR_A
-        sign = "+" if diff > 0 else ""
-        ax.text(i, max(qa, qb) * 1.08, f"{sign}{diff:.1f}%",
-                ha="center", va="bottom", color=color,
-                fontsize=9, fontweight="bold")
+    else:
+        color = COLOR_B if diff < 0 else COLOR_A
+    ax.text(i, ybase * 1.08, f"{sign}{diff:.1f}%",
+            ha="center", va="bottom", color=color,
+            fontsize=9, fontweight="bold")
 
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{s//1000}K\nvectors" for s in sizes_a], color=TEXT)
-    ax.set_ylabel("QPS (higher is better)", color=TEXT)
-    ax.set_title("Vector Search QPS (FAISS HNSW)", color=TEXT, fontsize=12, pad=10)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT)
+
+def style_ax(ax):
     ax.set_facecolor(PANEL)
     ax.tick_params(colors=TEXT)
     ax.spines[:].set_color(GRID)
     ax.yaxis.grid(True, color=GRID, linestyle="--", alpha=0.5)
 
 
-def plot_p99_latency(ax, data_a, data_b, label_a, label_b):
-    """P99 Latency comparison"""
-    sizes = [r["db_size"] for r in data_a["vector_search"]]
-    p99_a = [r["latency_p99_ms"] for r in data_a["vector_search"]]
-    p99_b = [r["latency_p99_ms"] for r in data_b["vector_search"]]
+# ── Plot 1: Vector Search QPS ─────────────────────────────────────────────────
 
-    ax.plot(range(len(sizes)), p99_a, "o-", color=COLOR_A,
-            label=label_a, linewidth=2, markersize=7)
-    ax.plot(range(len(sizes)), p99_b, "o-", color=COLOR_B,
-            label=label_b, linewidth=2, markersize=7)
-    ax.fill_between(range(len(sizes)), p99_a, p99_b,
-                    alpha=0.15, color=COLOR_B)
+def plot_qps(ax, da, db, la, lb):
+    sizes = [r["db_size"] for r in da["vector_search"]]
+    qps_a = [r["qps"]     for r in da["vector_search"]]
+    qps_b = [r["qps"]     for r in db["vector_search"]]
+    err_a = [r.get("qps_stddev", 0) for r in da["vector_search"]]
+    err_b = [r.get("qps_stddev", 0) for r in db["vector_search"]]
 
-    ax.set_xticks(range(len(sizes)))
+    x, w = np.arange(len(sizes)), 0.35
+    bar_with_err(ax, x - w/2, w, qps_a, err_a, COLOR_A, la)
+    bar_with_err(ax, x + w/2, w, qps_b, err_b, COLOR_B, lb)
+
+    for i, (va, vb) in enumerate(zip(qps_a, qps_b)):
+        diff_label(ax, i, va, vb, max(va, vb), higher_is_better=True)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{s//1000}K\nvectors" for s in sizes], color=TEXT)
+    ax.set_ylabel("QPS (higher is better)", color=TEXT)
+    ax.set_title("Vector Search QPS (FAISS HNSW)", color=TEXT, fontsize=12, pad=10)
+    ax.legend(facecolor=PANEL, labelcolor=TEXT)
+    style_ax(ax)
+
+
+# ── Plot 2: P99 Latency line ──────────────────────────────────────────────────
+
+def plot_p99(ax, da, db, la, lb):
+    sizes = [r["db_size"]          for r in da["vector_search"]]
+    p99_a = [r["latency_p99_ms"]   for r in da["vector_search"]]
+    p99_b = [r["latency_p99_ms"]   for r in db["vector_search"]]
+    err_a = [r.get("latency_p99_stddev", 0) for r in da["vector_search"]]
+    err_b = [r.get("latency_p99_stddev", 0) for r in db["vector_search"]]
+
+    xs = range(len(sizes))
+    ax.errorbar(xs, p99_a, yerr=err_a, fmt="o-", color=COLOR_A,
+                label=la, linewidth=2, markersize=7, capsize=4)
+    ax.errorbar(xs, p99_b, yerr=err_b, fmt="o-", color=COLOR_B,
+                label=lb, linewidth=2, markersize=7, capsize=4)
+    ax.fill_between(xs, p99_a, p99_b, alpha=0.12, color=COLOR_B)
+
+    ax.set_xticks(xs)
     ax.set_xticklabels([f"{s//1000}K" for s in sizes], color=TEXT)
     ax.set_ylabel("P99 Latency (ms, lower is better)", color=TEXT)
     ax.set_title("Vector Search P99 Latency", color=TEXT, fontsize=12, pad=10)
     ax.legend(facecolor=PANEL, labelcolor=TEXT)
-    ax.set_facecolor(PANEL)
-    ax.tick_params(colors=TEXT)
-    ax.spines[:].set_color(GRID)
-    ax.yaxis.grid(True, color=GRID, linestyle="--", alpha=0.5)
+    style_ax(ax)
 
 
-def plot_concurrent(ax, data_a, data_b, label_a, label_b):
-    """Concurrent Search QPS"""
-    conc_a = sorted(data_a["concurrent_search"].keys(), key=int)
-    conc_b = sorted(data_b["concurrent_search"].keys(), key=int)
+# ── Plot 3: P50/P95/P99 bar (largest DB) ─────────────────────────────────────
 
-    qps_a = [data_a["concurrent_search"][k]["qps"] for k in conc_a]
-    qps_b = [data_b["concurrent_search"][k]["qps"] for k in conc_b]
+def plot_latency_bars(ax, da, db, la, lb):
+    r_a = da["vector_search"][-1]
+    r_b = db["vector_search"][-1]
 
-    x = np.arange(len(conc_a))
-    w = 0.35
+    metrics = ["P50", "P95", "P99"]
+    vals_a  = [r_a["latency_p50_ms"], r_a["latency_p95_ms"], r_a["latency_p99_ms"]]
+    vals_b  = [r_b["latency_p50_ms"], r_b["latency_p95_ms"], r_b["latency_p99_ms"]]
+    err_a   = [r_a.get("latency_p50_stddev", 0), 0,
+               r_a.get("latency_p99_stddev", 0)]
+    err_b   = [r_b.get("latency_p50_stddev", 0), 0,
+               r_b.get("latency_p99_stddev", 0)]
 
-    err_a = [data_a["concurrent_search"][k].get("qps_stddev", 0) for k in conc_a]
-    err_b = [data_b["concurrent_search"][k].get("qps_stddev", 0) for k in conc_b]
+    x, w = np.arange(len(metrics)), 0.35
+    bar_with_err(ax, x - w/2, w, vals_a, err_a, COLOR_A, la)
+    bar_with_err(ax, x + w/2, w, vals_b, err_b, COLOR_B, lb)
 
-    ax.bar(x - w/2, qps_a, w, label=label_a, color=COLOR_A, alpha=0.85,
-           yerr=err_a, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
-    ax.bar(x + w/2, qps_b, w, label=label_b, color=COLOR_B, alpha=0.85,
-           yerr=err_b, error_kw=dict(ecolor="white", capsize=4, linewidth=1.2))
+    for i, (va, vb) in enumerate(zip(vals_a, vals_b)):
+        diff_label(ax, i, va, vb, max(va, vb), higher_is_better=False)
 
-    for i, (qa, qb) in enumerate(zip(qps_a, qps_b)):
-        diff = (qb - qa) / qa * 100
-        color = COLOR_B if diff > 0 else COLOR_A
-        sign = "+" if diff > 0 else ""
-        ax.text(i, max(qa, qb) * 1.08, f"{sign}{diff:.1f}%",
-                ha="center", va="bottom", color=color,
-                fontsize=9, fontweight="bold")
-
+    db_size = r_a["db_size"]
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{k} concurrent" for k in conc_a], color=TEXT)
-    ax.set_ylabel("QPS (higher is better)", color=TEXT)
-    ax.set_title("Concurrent Search QPS", color=TEXT, fontsize=12, pad=10)
+    ax.set_xticklabels(metrics, color=TEXT)
+    ax.set_ylabel("Latency (ms, lower is better)", color=TEXT)
+    ax.set_title(f"Search Latency Distribution\n({db_size//1000}K vectors, largest DB)",
+                 color=TEXT, fontsize=12, pad=10)
     ax.legend(facecolor=PANEL, labelcolor=TEXT)
-    ax.set_facecolor(PANEL)
-    ax.tick_params(colors=TEXT)
-    ax.spines[:].set_color(GRID)
-    ax.yaxis.grid(True, color=GRID, linestyle="--", alpha=0.5)
+    style_ax(ax)
 
 
-def plot_rag_ttft(ax, data_a, data_b, label_a, label_b):
-    """RAG TTFT comparison"""
-    rag_a = data_a.get("rag_ttft")
-    rag_b = data_b.get("rag_ttft")
+# ── Plot 4: RAG TTFT ──────────────────────────────────────────────────────────
+
+def plot_rag_ttft(ax, da, db, la, lb):
+    rag_a = da.get("rag_ttft")
+    rag_b = db.get("rag_ttft")
 
     if not rag_a or not rag_b:
-        ax.text(0.5, 0.5, "RAG TTFT data not available\n(run without --skip-rag)",
+        ax.text(0.5, 0.5,
+                "RAG TTFT data not available\n(run without --skip-rag)",
                 ha="center", va="center", color=TEXT, fontsize=11,
                 transform=ax.transAxes)
         ax.set_facecolor(PANEL)
@@ -184,67 +201,63 @@ def plot_rag_ttft(ax, data_a, data_b, label_a, label_b):
     vs_b = [rag_b["vector_search"]["p50_ms"],
             rag_b["vector_search"]["p95_ms"],
             rag_b["vector_search"]["p99_ms"]]
+    err_a = [rag_a["vector_search"].get("stddev_ms", 0)] * 3
+    err_b = [rag_b["vector_search"].get("stddev_ms", 0)] * 3
 
-    x = np.arange(len(metrics))
-    w = 0.35
-
-    ax.bar(x - w/2, vs_a, w, label=label_a, color=COLOR_A, alpha=0.85)
-    ax.bar(x + w/2, vs_b, w, label=label_b, color=COLOR_B, alpha=0.85)
+    x, w = np.arange(len(metrics)), 0.35
+    bar_with_err(ax, x - w/2, w, vs_a, err_a, COLOR_A, la)
+    bar_with_err(ax, x + w/2, w, vs_b, err_b, COLOR_B, lb)
 
     for i, (va, vb) in enumerate(zip(vs_a, vs_b)):
-        diff = (vb - va) / va * 100
-        color = COLOR_B if diff < 0 else COLOR_A
-        sign = "+" if diff > 0 else ""
-        ax.text(i, max(va, vb) * 1.05, f"{sign}{diff:.1f}%",
-                ha="center", va="bottom", color=color,
-                fontsize=9, fontweight="bold")
+        diff_label(ax, i, va, vb, max(va, vb), higher_is_better=False)
 
     ax.set_xticks(x)
     ax.set_xticklabels(metrics, color=TEXT)
-    ax.set_ylabel("Vector Search Latency (ms)", color=TEXT)
-    ax.set_title("RAG Vector Search Latency\n(lower is better)", color=TEXT, fontsize=12, pad=10)
+    ax.set_ylabel("Vector Search Latency in RAG (ms)", color=TEXT)
+    ax.set_title("RAG Pipeline — Vector Search Latency\n(lower is better)",
+                 color=TEXT, fontsize=12, pad=10)
     ax.legend(facecolor=PANEL, labelcolor=TEXT)
-    ax.set_facecolor(PANEL)
-    ax.tick_params(colors=TEXT)
-    ax.spines[:].set_color(GRID)
-    ax.yaxis.grid(True, color=GRID, linestyle="--", alpha=0.5)
+    style_ax(ax)
 
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="x3d-rag-benchmark result comparison")
+    parser = argparse.ArgumentParser()
     parser.add_argument("result_a", help="First result JSON (non-X3D)")
     parser.add_argument("result_b", help="Second result JSON (X3D)")
-    parser.add_argument("--output", default="comparison.png",
-                        help="Output image path (default: comparison.png)")
+    parser.add_argument("--output", default="comparison.png")
     args = parser.parse_args()
 
-    data_a = load(args.result_a)
-    data_b = load(args.result_b)
-
-    label_a = short_cpu(data_a["meta"]["cpu"])
-    label_b = short_cpu(data_b["meta"]["cpu"])
+    da = load(args.result_a)
+    db = load(args.result_b)
+    la = short_cpu(da["meta"]["cpu"])
+    lb = short_cpu(db["meta"]["cpu"])
 
     plt.style.use("dark_background")
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.patch.set_facecolor(BG)
 
+    runs_a = da["vector_search"][0].get("runs", 1)
+    runs_b = db["vector_search"][0].get("runs", 1)
     fig.suptitle(
-        f"x3d-rag-benchmark  |  {label_a} vs {label_b}\n"
-        f"RAG Vector Search CPU Performance",
+        f"x3d-rag-benchmark  |  {la} vs {lb}\n"
+        f"RAG Vector Search CPU Performance  "
+        f"({runs_a} runs, trimmed mean)",
         color=TEXT, fontsize=14, fontweight="bold", y=0.98
     )
 
-    plot_vector_search(axes[0][0], data_a, data_b, label_a, label_b)
-    plot_p99_latency  (axes[0][1], data_a, data_b, label_a, label_b)
-    plot_concurrent   (axes[1][0], data_a, data_b, label_a, label_b)
-    plot_rag_ttft     (axes[1][1], data_a, data_b, label_a, label_b)
+    plot_qps          (axes[0][0], da, db, la, lb)
+    plot_p99          (axes[0][1], da, db, la, lb)
+    plot_latency_bars (axes[1][0], da, db, la, lb)
+    plot_rag_ttft     (axes[1][1], da, db, la, lb)
 
-    meta_text = (
-        f"CPU A: {data_a['meta']['cpu']}  |  "
-        f"CPU B: {data_b['meta']['cpu']}  |  "
-        f"github.com/sorrymannn/x3d-rag-benchmark"
+    fig.text(
+        0.5, 0.01,
+        f"CPU A: {da['meta']['cpu']}  |  CPU B: {db['meta']['cpu']}  |  "
+        f"github.com/sorrymannn/x3d-rag-benchmark",
+        ha="center", color="#888888", fontsize=8
     )
-    fig.text(0.5, 0.01, meta_text, ha="center", color="#888888", fontsize=8)
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(args.output, dpi=150, bbox_inches="tight", facecolor=BG)
