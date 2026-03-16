@@ -108,6 +108,8 @@ python3 benchmark.py --quick --skip-rag
 | `--output FILE` | auto | Save results to specified JSON file |
 | `--model NAME` | llama3.2 | ollama model for RAG TTFT |
 | `--queries N` | 200 | Number of queries per run |
+| `--cache-dir PATH` | ./embedding_cache | Embedding cache directory |
+| `--rebuild` | off | Force rebuild embedding cache |
 | `--db-size N` | - | Override DB size (single value) |
 
 ---
