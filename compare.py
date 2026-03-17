@@ -179,19 +179,19 @@ def plot_latency_bars(ax, da, db, la, lb):
     style_ax(ax)
 
 
-# ── Plot 4: RAG TTFT ──────────────────────────────────────────────────────────
+# ── Plot 4: RAG Pipeline — Vector Search Latency ─────────────────────────────
 
-def plot_rag_ttft(ax, da, db, la, lb):
+def plot_rag_vector_search(ax, da, db, la, lb):
     rag_a = da.get("rag_ttft")
     rag_b = db.get("rag_ttft")
 
     if not rag_a or not rag_b:
         ax.text(0.5, 0.5,
-                "RAG TTFT data not available\n(run without --skip-rag)",
+                "RAG data not available\n(run without --skip-rag)",
                 ha="center", va="center", color=TEXT, fontsize=11,
                 transform=ax.transAxes)
         ax.set_facecolor(PANEL)
-        ax.set_title("RAG End-to-End TTFT", color=TEXT, fontsize=12, pad=10)
+        ax.set_title("RAG Pipeline — Vector Search Latency", color=TEXT, fontsize=12, pad=10)
         return
 
     metrics = ["P50", "P95", "P99"]
@@ -250,13 +250,12 @@ def main():
     plot_qps          (axes[0][0], da, db, la, lb)
     plot_p99          (axes[0][1], da, db, la, lb)
     plot_latency_bars (axes[1][0], da, db, la, lb)
-    plot_rag_ttft     (axes[1][1], da, db, la, lb)
+    plot_rag_vector_search(axes[1][1], da, db, la, lb)
 
     fig.text(
         0.5, 0.01,
-        f"CPU A: {da['meta']['cpu']}  (L3: {da['meta'].get('l3_cache', '?')})"
-        f"  |  CPU B: {db['meta']['cpu']}  (L3: {db['meta'].get('l3_cache', '?')})"
-        f"  |  github.com/sorrymannn/x3d-rag-benchmark",
+        f"CPU A: {da['meta']['cpu']}  |  CPU B: {db['meta']['cpu']}  |  "
+        f"github.com/sorrymannn/x3d-rag-benchmark",
         ha="center", color="#888888", fontsize=8
     )
 
