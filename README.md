@@ -59,7 +59,7 @@ Designed for reproducible, low-variance results:
 |---|---|
 | **Real Wikipedia embeddings** | Clusters by topic → stable HNSW traversal paths vs random vectors |
 | **Configurable FAISS threads** | Default: all cores (auto). Use `--threads 1` if CV > 3% |
-| **Trimmed mean** (drop top/bottom 5%) | Removes thermal throttle and outlier spikes |
+| **Trimmed mean** (drop outliers) | With 5 runs: drops 1 high + 1 low; with 10+: ~5% each side |
 | **5 runs by default** | Statistical reliability |
 | **Embedding cache** | Same vectors reused across runs and machines |
 | **OS-level variance controls** | CPU governor, NUMA, THP, process priority (auto-applied) |
