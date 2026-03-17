@@ -13,8 +13,9 @@ Key design decisions:
     → clusters by topic → stable, reproducible search paths
   - Configurable FAISS threads (default: auto)
     → use --threads 1 for maximum stability if CV > 3%
-  - Trimmed mean (drop top/bottom 5%)
-    → removes outliers from results
+  - Trimmed mean (drop top/bottom outliers)
+    → with runs=5, drops highest/lowest 1 each (median-of-3 style)
+    → with runs≥10, approaches true 5% trim on each side
   - Embeddings cached to disk
     → generated once, reused across runs
 
@@ -150,8 +151,8 @@ DEFAULT = {
     "hnsw_m":       32,
     "hnsw_ef":      64,
     "warmup":       30,        # warmup queries (discarded)
-    "runs":         5,         # default 5 runs
-    "trim":         0.05,      # trimmed mean: drop top/bottom 5%
+    "runs":         10,        # default 10 runs
+    "trim":         0.05,      # trim ratio: with 5 runs drops 1 high/1 low; with 10+ runs ≈5% each side
     "threads":      0,         # 0 = auto (all cores), 1 = single-threaded
     "rag_queries":  50,
     "cache_dir":    "./embedding_cache",
@@ -276,13 +277,14 @@ def get_gpu_info():
         return "N/A"
 
 def pct(data, p):
-    s = sorted(data)
-    return s[max(0, int(len(s) * p / 100) - 1)]
+    return float(np.percentile(data, p, method="linear"))
 
 def ms(t): return round(t * 1000, 3)
 
 def trimmed_mean(values, trim=0.05):
-    """Drop top/bottom trim% and return mean — removes outliers."""
+    """Drop top/bottom outliers and return mean.
+    With runs=5: drops 1 highest + 1 lowest (max(1, int(n*trim))).
+    With runs≥10: approaches true trim% on each side."""
     arr = sorted(values)
     cut = max(1, int(len(arr) * trim))
     trimmed = arr[cut:-cut] if cut > 0 else arr
@@ -389,12 +391,12 @@ def run_vector_search(db_size, cfg, db_emb, q_emb):
     FAISS HNSW benchmark.
 
     Stability measures:
-      - Single-threaded FAISS (omp_set_num_threads(1))
-        eliminates OS scheduler variance from multi-core dispatch
+      - Configurable FAISS threads (default: auto, all cores)
+        use --threads 1 for max stability if CV > 3%
       - Different query slice per run (real embeddings, not re-random)
         realistic query diversity without path randomness
-      - Trimmed mean across runs: drops top/bottom 5%
-        removes warmup spikes and thermal throttle outliers
+      - Trimmed mean across runs: drops outliers
+        (with 5 runs: drops 1 high + 1 low; with 10+: ~5% each side)
       - Explicit warmup queries discarded before measurement
     """
     dim    = db_emb.shape[1]
@@ -418,7 +420,13 @@ def run_vector_search(db_size, cfg, db_emb, q_emb):
 
     # Pre-normalize query slices
     n_per_run = cfg["n_queries"] + cfg["warmup"]
-    all_q     = q_emb[:n_per_run * n_runs].copy()
+    n_needed  = n_per_run * n_runs
+    if n_needed <= len(q_emb):
+        all_q = q_emb[:n_needed].copy()
+    else:
+        # Recycle queries if not enough (e.g. cache built with fewer runs)
+        repeats = (n_needed // len(q_emb)) + 1
+        all_q = np.tile(q_emb, (repeats, 1))[:n_needed].copy()
     faiss.normalize_L2(all_q)
 
     run_qps  = []
@@ -517,7 +525,12 @@ def run_rag_ttft(cfg, embed_model, db_emb, q_emb, passages):
     idx.hnsw.efSearch = 64
 
     n_q        = cfg["rag_queries"]
-    query_vecs = q_emb[:n_q * cfg["runs"] + 10].copy()
+    n_rag_needed = n_q * cfg["runs"] + 10
+    if n_rag_needed <= len(q_emb):
+        query_vecs = q_emb[:n_rag_needed].copy()
+    else:
+        repeats = (n_rag_needed // len(q_emb)) + 1
+        query_vecs = np.tile(q_emb, (repeats, 1))[:n_rag_needed].copy()
     faiss.normalize_L2(query_vecs)
 
     # Ollama warmup — ensures model is loaded, eliminates cold-start spike
@@ -698,7 +711,8 @@ def main():
     }
 
     # 1. Vector Search
-    print("\n[1/3] Vector Search Benchmark (FAISS HNSW, single-threaded)")
+    thread_mode = "single-threaded" if cfg.get("threads", 0) == 1 else f"auto ({cfg.get('threads', 0)} → all cores)"
+    print(f"\n[1/3] Vector Search Benchmark (FAISS HNSW, {thread_mode})")
     print("      Core CPU task in RAG — real Wikipedia embeddings")
     print("-"*60)
     for db_size in cfg["db_sizes"]:
@@ -709,7 +723,7 @@ def main():
     # 2. RAG TTFT
     if not args.skip_rag:
         print("\n[2/3] RAG End-to-End TTFT Benchmark")
-        print("      embed(GPU) → search(CPU, single-threaded) → LLM(GPU)")
+        print("      embed(GPU) → search(CPU) → LLM(GPU)")
         print("-"*60)
         output["rag_ttft"] = run_rag_ttft(
             cfg, embed_model, db_emb, q_emb, passages
