@@ -21,6 +21,7 @@ BG     = "#1A1A2E"
 PANEL  = "#16213E"
 TEXT   = "#E0E0E0"
 GRID   = "#2A2A4A"
+ERR_KW = None  # no error bars in multi-comparison (cleaner visuals)
 
 
 def load(path):
@@ -74,35 +75,30 @@ def plot_qps(ax, datasets, labels):
         err = [r.get("qps_stddev", 0) for r in d["vector_search"]]
         x = np.arange(n_sizes) - total_w/2 + w*j + w/2
         ax.bar(x, qps, w * 0.9, label=label, color=COLORS[j], alpha=0.85,
-               yerr=err, error_kw=dict(ecolor="white", capsize=3, linewidth=1))
+               )
 
     ax.set_xticks(np.arange(n_sizes))
     ax.set_xticklabels([f"{s//1000}K\nvectors" for s in sizes], color=TEXT)
     ax.set_ylabel("QPS (higher is better)", color=TEXT)
-    ax.set_title("Vector Search QPS (FAISS HNSW)", color=TEXT, fontsize=12, pad=25)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8,
-             loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=n)
+    ax.set_title("Vector Search QPS (FAISS HNSW)", color=TEXT, fontsize=12, pad=10)
     style_ax(ax)
 
 
 # ── Plot 2: P99 Latency line ──────────────────────────────────────────────────
 
 def plot_p99(ax, datasets, labels):
-    n = len(datasets)
     sizes = [r["db_size"] for r in datasets[0]["vector_search"]]
     xs = range(len(sizes))
 
     for j, (d, label) in enumerate(zip(datasets, labels)):
         p99 = [r["latency_p99_ms"] for r in d["vector_search"]]
-        err = [r.get("latency_p99_stddev", 0) for r in d["vector_search"]]
-        ax.errorbar(xs, p99, yerr=err, fmt="o-", color=COLORS[j],
-                    label=label, linewidth=2, markersize=6, capsize=4)
+        ax.plot(xs, p99, "o-", color=COLORS[j],
+                label=label, linewidth=2, markersize=5, alpha=0.85)
 
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{s//1000}K" for s in sizes], color=TEXT)
     ax.set_ylabel("P99 Latency (ms, lower is better)", color=TEXT)
-    ax.set_title("Vector Search P99 Latency", color=TEXT, fontsize=12, pad=25)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=min(n, 4))
+    ax.set_title("Vector Search P99 Latency", color=TEXT, fontsize=12, pad=10)
     style_ax(ax)
 
 
@@ -121,22 +117,20 @@ def plot_latency_bars(ax, datasets, labels):
         errs = [r.get("latency_p50_stddev", 0), 0, r.get("latency_p99_stddev", 0)]
         x = np.arange(n_metrics) - total_w/2 + w*j + w/2
         ax.bar(x, vals, w * 0.9, label=label, color=COLORS[j], alpha=0.85,
-               yerr=errs, error_kw=dict(ecolor="white", capsize=3, linewidth=1))
+               )
 
     db_size = datasets[0]["vector_search"][-1]["db_size"]
     ax.set_xticks(np.arange(n_metrics))
     ax.set_xticklabels(metrics, color=TEXT)
     ax.set_ylabel("Latency (ms, lower is better)", color=TEXT)
     ax.set_title(f"Search Latency Distribution\n({db_size//1000}K vectors, largest DB)",
-                 color=TEXT, fontsize=12, pad=25)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=min(n, 4))
+                 color=TEXT, fontsize=12, pad=10)
     style_ax(ax)
 
 
 # ── Plot 4: RAG Pipeline — Vector Search Latency ─────────────────────────────
 
 def plot_rag(ax, datasets, labels):
-    # Check if all have RAG data
     has_rag = all(d.get("rag_ttft") for d in datasets)
     if not has_rag:
         ax.text(0.5, 0.5,
@@ -144,7 +138,7 @@ def plot_rag(ax, datasets, labels):
                 ha="center", va="center", color=TEXT, fontsize=11,
                 transform=ax.transAxes)
         ax.set_facecolor(PANEL)
-        ax.set_title("RAG Pipeline — Vector Search Latency", color=TEXT, fontsize=12, pad=25)
+        ax.set_title("RAG Pipeline — Vector Search Latency", color=TEXT, fontsize=12, pad=10)
         return
 
     n = len(datasets)
@@ -162,14 +156,13 @@ def plot_rag(ax, datasets, labels):
         errs = [err_val] * 3
         x = np.arange(n_metrics) - total_w/2 + w*j + w/2
         ax.bar(x, vals, w * 0.9, label=label, color=COLORS[j], alpha=0.85,
-               yerr=errs, error_kw=dict(ecolor="white", capsize=3, linewidth=1))
+               )
 
     ax.set_xticks(np.arange(n_metrics))
     ax.set_xticklabels(metrics, color=TEXT)
     ax.set_ylabel("Vector Search Latency in RAG (ms)", color=TEXT)
     ax.set_title("RAG Pipeline — Vector Search Latency\n(lower is better)",
-                 color=TEXT, fontsize=12, pad=25)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=min(n, 4))
+                 color=TEXT, fontsize=12, pad=10)
     style_ax(ax)
 
 
@@ -201,7 +194,6 @@ def main():
                 new_labels.append(f"{label} ({l3})")
             else:
                 new_labels.append(label)
-        # If still duplicates, append index
         if len(set(new_labels)) != len(new_labels):
             new_labels = [f"{l} [{i+1}]" for i, l in enumerate(new_labels)]
         labels = new_labels
@@ -211,12 +203,11 @@ def main():
     fig.patch.set_facecolor(BG)
 
     runs = datasets[0]["vector_search"][0].get("runs", 1)
-    cpu_list = " vs ".join(labels)
     fig.suptitle(
-        f"x3d-rag-benchmark  |  {cpu_list}\n"
+        f"x3d-rag-benchmark  |  Multi-CPU Comparison\n"
         f"RAG Vector Search CPU Performance  "
         f"({runs} runs, trimmed mean)",
-        color=TEXT, fontsize=13, fontweight="bold", y=0.98
+        color=TEXT, fontsize=14, fontweight="bold", y=0.98
     )
 
     plot_qps          (axes[0][0], datasets, labels)
@@ -224,14 +215,20 @@ def main():
     plot_latency_bars (axes[1][0], datasets, labels)
     plot_rag          (axes[1][1], datasets, labels)
 
-    # Footer with all CPU names
+    # Single shared legend at top, between title and charts
+    handles, leg_labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, leg_labels,
+               loc="upper center", bbox_to_anchor=(0.5, 0.93),
+               ncol=len(datasets), facecolor=PANEL, labelcolor=TEXT,
+               fontsize=10, framealpha=0.9, edgecolor=GRID)
+
+    # Footer
     footer_parts = [f"CPU {i+1}: {d['meta']['cpu']}" for i, d in enumerate(datasets)]
     footer = "  |  ".join(footer_parts)
     footer += "  |  github.com/sorrymannn/x3d-rag-benchmark"
-    fig.text(0.5, 0.01, footer,
-             ha="center", color="#888888", fontsize=7)
+    fig.text(0.5, 0.01, footer, ha="center", color="#888888", fontsize=7)
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.91])
+    plt.tight_layout(rect=[0, 0.03, 1, 0.90])
     plt.savefig(args.output, dpi=150, bbox_inches="tight", facecolor=BG)
     print(f"Saved: {args.output}")
     plt.show()
