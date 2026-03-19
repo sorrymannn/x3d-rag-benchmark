@@ -79,14 +79,16 @@ def plot_qps(ax, datasets, labels):
     ax.set_xticks(np.arange(n_sizes))
     ax.set_xticklabels([f"{s//1000}K\nvectors" for s in sizes], color=TEXT)
     ax.set_ylabel("QPS (higher is better)", color=TEXT)
-    ax.set_title("Vector Search QPS (FAISS HNSW)", color=TEXT, fontsize=12, pad=10)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8, loc="upper left")
+    ax.set_title("Vector Search QPS (FAISS HNSW)", color=TEXT, fontsize=12, pad=25)
+    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8,
+             loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=n)
     style_ax(ax)
 
 
 # ── Plot 2: P99 Latency line ──────────────────────────────────────────────────
 
 def plot_p99(ax, datasets, labels):
+    n = len(datasets)
     sizes = [r["db_size"] for r in datasets[0]["vector_search"]]
     xs = range(len(sizes))
 
@@ -99,8 +101,8 @@ def plot_p99(ax, datasets, labels):
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{s//1000}K" for s in sizes], color=TEXT)
     ax.set_ylabel("P99 Latency (ms, lower is better)", color=TEXT)
-    ax.set_title("Vector Search P99 Latency", color=TEXT, fontsize=12, pad=10)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8)
+    ax.set_title("Vector Search P99 Latency", color=TEXT, fontsize=12, pad=25)
+    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=min(n, 4))
     style_ax(ax)
 
 
@@ -126,8 +128,8 @@ def plot_latency_bars(ax, datasets, labels):
     ax.set_xticklabels(metrics, color=TEXT)
     ax.set_ylabel("Latency (ms, lower is better)", color=TEXT)
     ax.set_title(f"Search Latency Distribution\n({db_size//1000}K vectors, largest DB)",
-                 color=TEXT, fontsize=12, pad=10)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8)
+                 color=TEXT, fontsize=12, pad=25)
+    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=min(n, 4))
     style_ax(ax)
 
 
@@ -142,7 +144,7 @@ def plot_rag(ax, datasets, labels):
                 ha="center", va="center", color=TEXT, fontsize=11,
                 transform=ax.transAxes)
         ax.set_facecolor(PANEL)
-        ax.set_title("RAG Pipeline — Vector Search Latency", color=TEXT, fontsize=12, pad=10)
+        ax.set_title("RAG Pipeline — Vector Search Latency", color=TEXT, fontsize=12, pad=25)
         return
 
     n = len(datasets)
@@ -166,8 +168,8 @@ def plot_rag(ax, datasets, labels):
     ax.set_xticklabels(metrics, color=TEXT)
     ax.set_ylabel("Vector Search Latency in RAG (ms)", color=TEXT)
     ax.set_title("RAG Pipeline — Vector Search Latency\n(lower is better)",
-                 color=TEXT, fontsize=12, pad=10)
-    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8)
+                 color=TEXT, fontsize=12, pad=25)
+    ax.legend(facecolor=PANEL, labelcolor=TEXT, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=min(n, 4))
     style_ax(ax)
 
 
@@ -229,7 +231,7 @@ def main():
     fig.text(0.5, 0.01, footer,
              ha="center", color="#888888", fontsize=7)
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.93])
+    plt.tight_layout(rect=[0, 0.03, 1, 0.91])
     plt.savefig(args.output, dpi=150, bbox_inches="tight", facecolor=BG)
     print(f"Saved: {args.output}")
     plt.show()
