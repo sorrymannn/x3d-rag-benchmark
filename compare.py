@@ -1,12 +1,11 @@
 """
 compare_pitch.py
 ================
-Pitch deck version: 3 clean charts, 2 key values each.
 Designed for slides — minimal, impactful.
 
 Usage:
-  python compare_pitch.py result1.json result2.json result3.json result4.json
-  python compare_pitch.py *.json --output pitch_comparison.png
+  python compare.py result1.json result2.json result3.json result4.json
+  python compare.py *.json --output comparison.png
 """
 
 import argparse
