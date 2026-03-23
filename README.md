@@ -1,6 +1,6 @@
 # x3d-rag-benchmark
 
-**CPU Performance Benchmark for RAG AI Pipelines — AMD X3D vs Non-X3D vs Intel**
+**CPU Performance Benchmark for RAG AI Pipelines**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
@@ -8,7 +8,7 @@
 ![HuggingFace](https://img.shields.io/badge/HuggingFace-sentence--transformers-orange.svg)
 
 An open-source benchmark measuring the impact of CPU cache and architecture
-on RAG AI pipelines. Supports AMD Ryzen (X3D / non-X3D) and Intel Core Ultra CPUs.
+on RAG AI pipelines. Works with any x86 CPU (AMD, Intel).
 
 ---
 
@@ -39,16 +39,11 @@ Vector Search characteristics:
 
 ---
 
-## Tested CPUs
+## Supported CPUs
 
-| CPU | Vendor | L3 Cache | Boost | Architecture |
-|---|---|---|---|---|
-| Ryzen 7 9850X3D | AMD | **96 MB (V-Cache)** | 5.2 GHz | Zen 5, 8C/16T |
-| Ryzen 7 9700X | AMD | 32 MB | 5.5 GHz | Zen 5, 8C/16T |
-| Core Ultra 9 285K | Intel | 36 MB | 5.7 GHz | Arrow Lake, 8P+16E |
-| Core Ultra 7 265K | Intel | 30 MB | 5.5 GHz | Arrow Lake, 8P+12E |
+Any x86 CPU supported by FAISS can be tested. The benchmark automatically detects CPU model, L3 cache size, and available instruction sets (AVX2 / AVX-512).
 
-> Any CPU supported by FAISS can be tested. The above are example configurations.
+Example tested configurations include AMD Ryzen X3D (96MB L3), AMD Ryzen non-X3D (32MB L3), and Intel Core Ultra series.
 
 ---
 
