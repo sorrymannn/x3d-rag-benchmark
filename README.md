@@ -1,14 +1,14 @@
 # x3d-rag-benchmark
 
-**AMD Ryzen X3D V-Cache vs non-X3D — RAG AI Pipeline CPU Performance Benchmark**
+**CPU Performance Benchmark for RAG AI Pipelines — AMD X3D vs Non-X3D vs Intel**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![FAISS](https://img.shields.io/badge/Meta-FAISS-blue.svg)
 ![HuggingFace](https://img.shields.io/badge/HuggingFace-sentence--transformers-orange.svg)
 
-An open-source benchmark measuring the impact of CPU (X3D vs non-X3D) on RAG AI pipelines
-in real AI PC environments where GPU is also in use.
+An open-source benchmark measuring the impact of CPU cache and architecture
+on RAG AI pipelines. Supports AMD Ryzen (X3D / non-X3D) and Intel Core Ultra CPUs.
 
 ---
 
@@ -25,7 +25,7 @@ RAG Pipeline:
       ↓
   Embedding generation   (GPU)
       ↓
-  Vector Search          (CPU) ← X3D V-Cache effect
+  Vector Search          (CPU) ← L3 cache effect
       ↓
   LLM generation         (GPU)
       ↓
@@ -35,14 +35,26 @@ Vector Search characteristics:
   - Randomly traverses HNSW graph nodes
   - Each traversal accesses a different memory address (Random Access)
   - Larger L3 cache → higher cache hit rate → lower latency
-  - 96MB V-Cache = same mechanism as X3D dominance in gaming
 ```
+
+---
+
+## Tested CPUs
+
+| CPU | Vendor | L3 Cache | Boost | Architecture |
+|---|---|---|---|---|
+| Ryzen 7 9850X3D | AMD | **96 MB (V-Cache)** | 5.2 GHz | Zen 5, 8C/16T |
+| Ryzen 7 9700X | AMD | 32 MB | 5.5 GHz | Zen 5, 8C/16T |
+| Core Ultra 9 285K | Intel | 36 MB | 5.7 GHz | Arrow Lake, 8P+16E |
+| Core Ultra 7 265K | Intel | 30 MB | 5.5 GHz | Arrow Lake, 8P+12E |
+
+> Any CPU supported by FAISS can be tested. The above are example configurations.
 
 ---
 
 ## What We Measure
 
-| Metric | Description | X3D Impact |
+| Metric | Description | Cache Impact |
 |---|---|---|
 | Vector Search QPS | FAISS HNSW queries per second | **Direct** |
 | Vector Search P99 Latency | Worst-case search latency | **Direct** |
@@ -60,27 +72,36 @@ Designed for reproducible, low-variance results:
 | **Real Wikipedia embeddings** | Clusters by topic → stable HNSW traversal paths vs random vectors |
 | **Configurable FAISS threads** | Default: all cores (auto). Use `--threads 1` if CV > 3% |
 | **Trimmed mean** (drop outliers) | With 5 runs: drops 1 high + 1 low; with 10+: ~5% each side |
-| **5 runs by default** | Statistical reliability |
 | **Embedding cache** | Same vectors reused across runs and machines |
 | **OS-level variance controls** | CPU governor, NUMA, THP, process priority (auto-applied) |
 | **Inter-run cooling** | 2s delay between runs prevents thermal drift |
 | **Python GC disabled** | No garbage collection during measurement |
 
-> **Same CPU should produce CV < 3%** (coefficient of variation).
-> If CV > 3%, try `--threads 1` (single-threaded) or increase `--runs`.
+### Recommended Environment
 
-### Automatic Variance Controls
+For lowest variance, **Linux native** (not WSL) is recommended:
 
-The benchmark automatically applies these at startup (skips if no permission):
+```bash
+# Ubuntu 24.04 recommended settings (applied automatically by benchmark)
+# - CPU governor: performance
+# - NUMA balancing: off
+# - THP: never
+# - Process priority: nice -20
+```
 
-| Control | Linux | Windows | macOS |
-|---|---|---|---|
-| CPU frequency lock | `scaling_governor → performance` | High Performance power plan | N/A |
-| NUMA balancing | `kernel.numa_balancing=0` | N/A | N/A |
-| THP | `transparent_hugepage → never` | N/A | N/A |
-| Process priority | `nice -20` | `HIGH_PRIORITY_CLASS` | `nice -20` |
-| Python GC | Disabled during benchmark | same | same |
-| Inter-run cooling | 2s between runs | same | same |
+Windows is also supported but P99 may show higher variance due to OS interrupts.
+
+### AVX-512 / AVX2
+
+FAISS detects the highest supported instruction set at runtime. You can verify with:
+
+```python
+python -c "import faiss; print(faiss.get_compile_options())"
+```
+
+- **AMD Ryzen (Zen 5)**: Reports AVX-512 when enabled in BIOS
+- **Intel Arrow Lake**: AVX-512 not supported, uses AVX2
+- **BIOS AVX-512 DISABLE**: All CPUs use AVX2 (level playing field)
 
 ### CV Quality Thresholds
 
@@ -118,7 +139,7 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-> **Note for Windows**: `faiss-cpu` installs directly via pip. No Visual Studio build required.
+> **Note for Windows**: `faiss-cpu` installs directly via pip. No build tools required.
 
 ### 3. ollama + LLM model (only needed for RAG TTFT)
 
@@ -143,10 +164,10 @@ ollama pull llama3.2
 **Linux / macOS:**
 ```bash
 # Vector Search only (no ollama needed, ~30-45 min)
-python3 benchmark.py --skip-rag --output 9800x3d.json  # use your CPU name
+python3 benchmark.py --skip-rag --output 9850x3d.json  # use your CPU name
 
 # Full benchmark (Vector Search + RAG TTFT)
-python3 benchmark.py --output 9800x3d.json  # use your CPU name
+python3 benchmark.py --output 9850x3d.json  # use your CPU name
 
 # Quick test (~5 min)
 python3 benchmark.py --quick --skip-rag
@@ -154,13 +175,8 @@ python3 benchmark.py --quick --skip-rag
 
 **Windows:**
 ```powershell
-# Vector Search only
-python benchmark.py --skip-rag --output 9800x3d.json  # use your CPU name
-
-# Full benchmark
-python benchmark.py --output 9800x3d.json  # use your CPU name
-
-# Quick test
+python benchmark.py --skip-rag --output 9850x3d.json  # use your CPU name
+python benchmark.py --output 9850x3d.json  # use your CPU name
 python benchmark.py --quick --skip-rag
 ```
 
@@ -183,52 +199,47 @@ python benchmark.py --quick --skip-rag
 
 ## Compare Results
 
-Generate comparison charts from two JSON result files.
+Three comparison scripts are available:
 
-**Linux / macOS:**
+### compare.py — 2 CPU comparison (detailed)
+
 ```bash
-python3 compare.py 9700x.json 9800x3d.json  # compare two CPU results
+python3 compare.py 9700x.json 9850x3d.json  # compare two CPU results
 ```
 
-**Windows:**
-```powershell
-python compare.py 9700x.json 9800x3d.json  # compare two CPU results
+Outputs `comparison.png` with 4 charts: QPS, P99 Latency, Latency Distribution, RAG Pipeline.
+
+### compare_multi.py — 2-6 CPU comparison
+
+```bash
+python3 compare_multi.py 9850x3d.json 9700x.json 285k.json 265k.json
 ```
 
-Outputs `comparison.png`.
+Outputs `multi_comparison.png`. Shows all CPUs side by side with % difference labels.
 
-### Chart contents
-- **Vector Search QPS** — bar chart with error bars by DB size
-- **Vector Search P99 Latency** — line chart with error bars
-- **Latency Distribution** — P50 / P95 / P99 bar chart (largest DB)
-- **RAG TTFT** — vector search latency inside full RAG pipeline
+### compare_pitch.py — Pitch deck version (clean, minimal)
+
+```bash
+python3 compare_pitch.py 9850x3d.json 9700x.json 285k.json 265k.json --output pitch.png
+```
+
+Outputs `pitch_comparison.png`. 3 charts (QPS, Latency, RAG) with only the most important values. Designed for slides and presentations.
 
 ---
 
 ## Sharing Embeddings Between Machines
 
-For a fair comparison, use **identical embedding vectors** on both CPUs.
+For a fair comparison, use **identical embedding vectors** on all CPUs.
 
-**Linux → Linux:**
 ```bash
 # Generate on first machine
-python3 benchmark.py --output 9700x.json  # name after your CPU
+python3 benchmark.py --output cpu_a.json  # name after your CPU
 
 # Copy cache to second machine
 scp -r ./embedding_cache/ user@other-machine:~/x3d-rag-benchmark/
 
-# Run on second machine
-python3 benchmark.py --output 9800x3d.json  # name after your CPU
-```
-
-**Windows → Windows (or cross-platform):**
-```powershell
-# Generate on first machine
-python benchmark.py --output 9700x.json  # name after your CPU
-
-# Copy embedding_cache folder to second machine via USB, network share, etc.
-# Then run on second machine
-python benchmark.py --output 9800x3d.json  # name after your CPU
+# Run on second machine (loads from cache instantly)
+python3 benchmark.py --output cpu_b.json  # name after your CPU
 ```
 
 > Embedding cache is cross-platform compatible (numpy `.npy` files).
@@ -248,23 +259,26 @@ python benchmark.py --output 9800x3d.json  # name after your CPU
 
 ## Reproducibility Conditions
 
+- Use Linux native for lowest variance (Ubuntu 24.04 recommended)
 - Minimize background processes
 - Reboot before benchmarking (recommended)
 - Use identical RAM capacity and speed
 - Use identical GPU
-- Use `--runs 5` or higher for publication-quality results
+- Use `--runs 10` or higher for publication-quality results
 - Share `embedding_cache/` between machines for fair comparison
+- Check AVX instruction set with `faiss.get_compile_options()`
 
 ### BIOS Settings (recommended)
 
-For best reproducibility, set identically on both systems:
+For best reproducibility, set identically on all systems:
 
 | Setting | Recommendation |
 |---|---|
-| PBO / Turbo Boost | Same on both (both ON or both OFF) |
+| PBO / Turbo Boost | Same on all (all ON or all OFF) |
 | XMP / EXPO | Same memory profile (e.g. DDR5-6000 CL30) |
 | C-States | Disabled |
 | Cool & Quiet | Disabled |
+| AVX-512 | Note the setting — affects FAISS instruction path |
 
 ---
 
@@ -272,4 +286,4 @@ For best reproducibility, set identically on both systems:
 
 PRs and issues welcome.
 Submit your results (JSON files) to the `results/` folder via PR.
-Include: CPU model, motherboard, BIOS version, memory config, OS.
+Include: CPU model, motherboard, BIOS version, memory config, OS, AVX setting.
