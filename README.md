@@ -194,31 +194,20 @@ python benchmark.py --quick --skip-rag
 
 ## Compare Results
 
-Three comparison scripts are available:
-
-### compare.py — 2 CPU comparison (detailed)
+Compare 2-6 CPU results in a single chart.
 
 ```bash
-python3 compare.py 9700x.json 9850x3d.json  # compare two CPU results
+# 2 CPUs
+python3 compare.py 9700x.json 9850x3d.json
+
+# 4 CPUs
+python3 compare.py 9850x3d.json 9700x.json 285k.json 265k.json
+
+# Custom output filename
+python3 compare.py *.json --output my_comparison.png
 ```
 
-Outputs `comparison.png` with 4 charts: QPS, P99 Latency, Latency Distribution, RAG Pipeline.
-
-### compare_multi.py — 2-6 CPU comparison
-
-```bash
-python3 compare_multi.py 9850x3d.json 9700x.json 285k.json 265k.json
-```
-
-Outputs `multi_comparison.png`. Shows all CPUs side by side with % difference labels.
-
-### compare_pitch.py — Pitch deck version (clean, minimal)
-
-```bash
-python3 compare_pitch.py 9850x3d.json 9700x.json 285k.json 265k.json --output pitch.png
-```
-
-Outputs `pitch_comparison.png`. 3 charts (QPS, Latency, RAG) with only the most important values. Designed for slides and presentations.
+Outputs `comparison.png` with 3 charts: QPS (500K/1000K), Search Latency (P50/P95), RAG Pipeline (P50/P95). Percentage labels show difference vs the first CPU.
 
 ---
 
