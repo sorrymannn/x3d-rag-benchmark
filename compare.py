@@ -1,5 +1,5 @@
 """
-compare_pitch.py
+compare.py
 ================
 Designed for slides — minimal, impactful.
 
@@ -170,9 +170,9 @@ def plot_rag(ax, datasets, labels):
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Pitch deck comparison (2-6 CPUs)")
+    parser = argparse.ArgumentParser(description="comparison (2-6 CPUs)")
     parser.add_argument("results", nargs="+", help="Result JSON files (2-6)")
-    parser.add_argument("--output", default="pitch_comparison.png")
+    parser.add_argument("--output", default="comparison.png")
     args = parser.parse_args()
 
     if len(args.results) < 2 or len(args.results) > 6:
