@@ -41,7 +41,7 @@ Vector Search characteristics:
 
 ## Supported CPUs
 
-Any x86 CPU supported by FAISS can be tested. The benchmark automatically detects CPU model, L3 cache size, and available instruction sets (AVX2 / AVX-512).
+Any x86 CPU supported by FAISS can be tested. The benchmark automatically detects CPU model, L3 cache size, and available instruction sets.
 
 Example tested configurations include AMD Ryzen X3D (96MB L3), AMD Ryzen non-X3D (32MB L3), and Intel Core Ultra series.
 
@@ -86,17 +86,6 @@ For lowest variance, **Linux native** (not WSL) is recommended:
 
 Windows is also supported but P99 may show higher variance due to OS interrupts.
 
-### AVX-512 / AVX2
-
-FAISS detects the highest supported instruction set at runtime. You can verify with:
-
-```python
-python -c "import faiss; print(faiss.get_compile_options())"
-```
-
-- **AMD Ryzen (Zen 5)**: Reports AVX-512 when enabled in BIOS
-- **Intel Arrow Lake**: AVX-512 not supported, uses AVX2
-- **BIOS AVX-512 DISABLE**: All CPUs use AVX2 (level playing field)
 
 ### CV Quality Thresholds
 
@@ -250,7 +239,6 @@ python3 benchmark.py --output cpu_b.json  # name after your CPU
 - Use identical GPU
 - Use `--runs 10` or higher for publication-quality results
 - Share `embedding_cache/` between machines for fair comparison
-- Check AVX instruction set with `faiss.get_compile_options()`
 
 ### BIOS Settings (recommended)
 
@@ -262,7 +250,6 @@ For best reproducibility, set identically on all systems:
 | XMP / EXPO | Same memory profile (e.g. DDR5-6000 CL30) |
 | C-States | Disabled |
 | Cool & Quiet | Disabled |
-| AVX-512 | Note the setting — affects FAISS instruction path |
 
 ---
 
@@ -270,4 +257,4 @@ For best reproducibility, set identically on all systems:
 
 PRs and issues welcome.
 Submit your results (JSON files) to the `results/` folder via PR.
-Include: CPU model, motherboard, BIOS version, memory config, OS, AVX setting.
+Include: CPU model, motherboard, BIOS version, memory config, OS.
