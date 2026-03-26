@@ -165,7 +165,60 @@ CACHE_TEXT_FILE = "wiki_passages.json"
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 
+def _win_cpu_from_registry():
+    """Read CPU name from Windows registry (most reliable method)."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+        )
+        name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+        winreg.CloseKey(key)
+        return name.strip()
+    except Exception:
+        return None
+
+
+def _win_cpu_from_powershell():
+    """Read CPU name via PowerShell (fallback)."""
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Processor).Name"],
+            text=True, stderr=subprocess.DEVNULL, timeout=10
+        )
+        name = out.strip()
+        if name:
+            return name
+    except Exception:
+        pass
+    return None
+
+
+def _win_cpu_from_wmic():
+    """Read CPU name via wmic (legacy fallback)."""
+    try:
+        out = subprocess.check_output(
+            ["wmic", "cpu", "get", "Name", "/format:list"],
+            text=True, stderr=subprocess.DEVNULL, timeout=10)
+        for line in out.strip().splitlines():
+            if "Name=" in line:
+                name = line.split("=", 1)[1].strip()
+                if name:
+                    return name
+    except Exception:
+        pass
+    return None
+
+
 def get_cpu_info():
+    """
+    Detect CPU full name.
+    Windows: registry → PowerShell → wmic → platform.processor()
+    Linux:   /proc/cpuinfo
+    macOS:   sysctl
+    """
     if platform.system() == "Linux":
         try:
             with open("/proc/cpuinfo") as f:
@@ -175,15 +228,20 @@ def get_cpu_info():
         except Exception:
             pass
     elif platform.system() == "Windows":
-        try:
-            out = subprocess.check_output(
-                ["wmic", "cpu", "get", "Name", "/format:list"],
-                text=True, stderr=subprocess.DEVNULL)
-            for line in out.strip().splitlines():
-                if "Name=" in line:
-                    return line.split("=", 1)[1].strip()
-        except Exception:
-            pass
+        # Try multiple methods in order of reliability
+        for method in [_win_cpu_from_registry,
+                       _win_cpu_from_powershell,
+                       _win_cpu_from_wmic]:
+            result = method()
+            if result and "Family" not in result:
+                return result
+        # If all methods returned "Family..." style, still use the best one
+        for method in [_win_cpu_from_registry,
+                       _win_cpu_from_powershell,
+                       _win_cpu_from_wmic]:
+            result = method()
+            if result:
+                return result
     elif platform.system() == "Darwin":
         try:
             return subprocess.check_output(
@@ -194,8 +252,45 @@ def get_cpu_info():
     return platform.processor() or "Unknown CPU"
 
 
+def _win_l3_from_powershell():
+    """Read L3 cache size via PowerShell (most reliable on Windows)."""
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Processor).L3CacheSize"],
+            text=True, stderr=subprocess.DEVNULL, timeout=10
+        )
+        val = int(out.strip())
+        if val > 0:
+            return f"{val // 1024} MiB"
+    except Exception:
+        pass
+    return None
+
+
+def _win_l3_from_wmic():
+    """Read L3 cache size via wmic (legacy fallback)."""
+    try:
+        out = subprocess.check_output(
+            ["wmic", "cpu", "get", "L3CacheSize", "/format:list"],
+            text=True, stderr=subprocess.DEVNULL, timeout=10)
+        for line in out.strip().splitlines():
+            if "L3CacheSize=" in line:
+                val = line.split("=")[1].strip()
+                if val and int(val) > 0:
+                    return f"{int(val) // 1024} MiB"
+    except Exception:
+        pass
+    return None
+
+
 def get_l3_cache():
-    """L3 캐시 크기 감지 (편차 분석용)"""
+    """
+    Detect L3 cache size.
+    Windows: PowerShell → wmic
+    Linux:   lscpu
+    macOS:   sysctl
+    """
     if platform.system() == "Linux":
         try:
             out = subprocess.check_output(["lscpu"], text=True, stderr=subprocess.DEVNULL)
@@ -205,17 +300,10 @@ def get_l3_cache():
         except Exception:
             pass
     elif platform.system() == "Windows":
-        try:
-            out = subprocess.check_output(
-                ["wmic", "cpu", "get", "L3CacheSize", "/format:list"],
-                text=True, stderr=subprocess.DEVNULL)
-            for line in out.strip().splitlines():
-                if "L3CacheSize=" in line:
-                    val = int(line.split("=")[1].strip())
-                    if val > 0:
-                        return f"{val // 1024} MiB"
-        except Exception:
-            pass
+        for method in [_win_l3_from_powershell, _win_l3_from_wmic]:
+            result = method()
+            if result:
+                return result
     elif platform.system() == "Darwin":
         try:
             l3 = int(subprocess.check_output(
@@ -231,24 +319,50 @@ def get_memory_info():
     info = {"total_gb": 0, "speed": "Unknown"}
     if platform.system() == "Windows":
         try:
+            # Try PowerShell first
             out = subprocess.check_output(
-                ["wmic", "memorychip", "get", "Capacity,ConfiguredClockSpeed",
-                 "/format:list"], text=True, stderr=subprocess.DEVNULL)
-            caps, speeds = [], []
-            for line in out.strip().splitlines():
-                if "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                if k.strip() == "Capacity" and v.strip():
-                    caps.append(int(v.strip()))
-                elif k.strip() == "ConfiguredClockSpeed" and v.strip():
-                    speeds.append(int(v.strip()))
-            if caps:
-                info["total_gb"] = round(sum(caps) / 1024**3, 1)
-            if speeds:
-                info["speed"] = f"{max(speeds)} MT/s"
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_PhysicalMemory | "
+                 "Measure-Object -Property Capacity -Sum).Sum"],
+                text=True, stderr=subprocess.DEVNULL, timeout=10
+            )
+            total = int(out.strip())
+            if total > 0:
+                info["total_gb"] = round(total / 1024**3, 1)
         except Exception:
-            pass
+            try:
+                out = subprocess.check_output(
+                    ["wmic", "memorychip", "get", "Capacity,ConfiguredClockSpeed",
+                     "/format:list"], text=True, stderr=subprocess.DEVNULL)
+                caps, speeds = [], []
+                for line in out.strip().splitlines():
+                    if "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    if k.strip() == "Capacity" and v.strip():
+                        caps.append(int(v.strip()))
+                    elif k.strip() == "ConfiguredClockSpeed" and v.strip():
+                        speeds.append(int(v.strip()))
+                if caps:
+                    info["total_gb"] = round(sum(caps) / 1024**3, 1)
+                if speeds:
+                    info["speed"] = f"{max(speeds)} MT/s"
+            except Exception:
+                pass
+        # Memory speed via PowerShell if not yet found
+        if info["speed"] == "Unknown":
+            try:
+                out = subprocess.check_output(
+                    ["powershell", "-NoProfile", "-Command",
+                     "(Get-CimInstance Win32_PhysicalMemory | "
+                     "Select-Object -First 1).ConfiguredClockSpeed"],
+                    text=True, stderr=subprocess.DEVNULL, timeout=10
+                )
+                speed = int(out.strip())
+                if speed > 0:
+                    info["speed"] = f"{speed} MT/s"
+            except Exception:
+                pass
     elif platform.system() == "Linux":
         try:
             with open("/proc/meminfo") as f:
