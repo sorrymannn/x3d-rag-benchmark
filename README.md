@@ -157,6 +157,20 @@ python3 benchmark.py --output 9850x3d.json  # use your CPU name
 python3 benchmark.py --quick --skip-rag
 ```
 
+**Linux / macOS (Using taskset):**
+```bash
+# Vector Search only (no ollama needed, ~30-45 min)
+taskset -c 0 python3 benchmark.py --skip-rag --threads 1 --output 9850x3d.json  # use your CPU name
+
+# Full benchmark (Vector Search + RAG TTFT)
+taskset -c 0 python3 benchmark.py --threads 1 --output 9850x3d.json  # use your CPU name
+
+# Quick test (~5 min)
+taskset -c 0 python3 benchmark.py --quick --skip-rag --threads 1
+```
+taskset pins the process to a specific CPU core, reducing scheduling noise and improving benchmark consistency.
+
+
 **Windows:**
 ```powershell
 python benchmark.py --skip-rag --output 9850x3d.json  # use your CPU name
