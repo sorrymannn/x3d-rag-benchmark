@@ -479,16 +479,22 @@ def _rag_worker(args):
     """
     worker_id, db_emb_path, q_emb_path, passages_path, cfg = args
 
-    db_emb = np.load(db_emb_path)
-    q_emb = np.load(q_emb_path)
-    with open(passages_path) as f:
-        passages = json.load(f)
-
     import faiss as faiss_local
     import ollama as ollama_local
 
-    rag_db_size = min(10_000, len(db_emb))
-    vecs = db_emb[:rag_db_size].copy()
+    # Memory-efficient: mmap the full file, copy only the small slice we need
+    rag_db_size = 10_000
+    db_mmap = np.load(db_emb_path, mmap_mode='r')
+    vecs = db_mmap[:rag_db_size].copy()
+    del db_mmap  # release mmap handle
+
+    q_mmap = np.load(q_emb_path, mmap_mode='r')
+    q_emb = q_mmap[:cfg["rag_queries_per_worker"]].copy()
+    del q_mmap
+
+    # Load pre-sliced small passages file (only 10K entries, ~few MB)
+    with open(passages_path) as f:
+        passages = json.load(f)
     faiss_local.normalize_L2(vecs)
     dim = vecs.shape[1]
 
@@ -549,11 +555,30 @@ def run_concurrent_rag(cfg, db_emb_path, q_emb_path, passages_path):
     """
     n_workers = cfg["rag_workers"] or get_cpu_count()
     n_workers = min(n_workers, 8)  # cap to avoid overwhelming ollama
+    
+    # Cap based on available memory (~500MB per worker for safety)
+    mem = get_memory_info()
+    if mem["total_gb"] > 0:
+        mem_cap = max(2, int(mem["total_gb"] / 2))  # ~2GB per worker
+        n_workers = min(n_workers, mem_cap)
     n_runs = cfg["rag_runs"]
 
     print(f"\n  Workers: {n_workers} | "
           f"queries/worker: {cfg['rag_queries_per_worker']} | "
           f"runs: {n_runs}")
+
+    # Pre-slice passages to small temp file (avoids each worker loading full JSON)
+    import tempfile
+    with open(passages_path) as f:
+        all_passages = json.load(f)
+    small_passages = all_passages[:10_000]
+    del all_passages
+
+    small_passages_path = os.path.join(
+        tempfile.gettempdir(), "rag_passages_10k.json")
+    with open(small_passages_path, "w") as f:
+        json.dump(small_passages, f)
+    del small_passages
 
     # Warmup ollama
     print("  Warming up ollama...", end=" ", flush=True)
@@ -572,7 +597,7 @@ def run_concurrent_rag(cfg, db_emb_path, q_emb_path, passages_path):
 
     for run_i in range(n_runs):
         worker_args = [
-            (w, db_emb_path, q_emb_path, passages_path, cfg)
+            (w, db_emb_path, q_emb_path, small_passages_path, cfg)
             for w in range(n_workers)
         ]
 
@@ -622,6 +647,12 @@ def run_concurrent_rag(cfg, db_emb_path, q_emb_path, passages_path):
     print(f"  → concurrent throughput: {result['throughput_qps']:.1f} req/s "
           f"±{result['throughput_stddev']:.1f} | "
           f"avg TTFT: {result['avg_ttft_ms']:.1f}ms")
+
+    # Cleanup temp file
+    try:
+        os.remove(small_passages_path)
+    except Exception:
+        pass
 
     return result
 
