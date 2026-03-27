@@ -1,17 +1,19 @@
 """
-x3d-rag-benchmark — Full CPU Benchmark
+x3d-rag-benchmark - Full CPU Benchmark
 =======================================
 Measures whole-CPU performance in GPU-centric AI inference environments.
 
 While benchmark.py isolates single-core L3 cache effects,
 this script measures how the ENTIRE CPU performs under realistic
-multi-core AI workloads.
+multi-core AI workloads where L3 cache contention matters.
 
 Tests:
-  1. Batch Vector Search    — FAISS HNSW with all cores (OMP threads)
-  2. Concurrent RAG Pipeline — Multiple RAG requests in parallel (multiprocessing)
-  3. CPU Embedding Throughput — SentenceTransformer on CPU only
-  4. Data Feeding Throughput  — Tokenizer + GPU tensor transfer rate
+  1. Batch Vector Search      - FAISS HNSW with all cores (OMP threads)
+     > L3 cache contention across CCDs
+  2. Concurrent RAG Pipeline  - Multiple RAG requests in parallel
+     > L3 cache competition between independent workers
+  3. Data Feeding Throughput  - Tokenizer > GPU tensor transfer rate
+     > CPU preparation speed that determines GPU utilization
 
 Shares embedding cache with benchmark.py (./embedding_cache/)
 
@@ -19,11 +21,11 @@ Install:
   pip install faiss-cpu sentence-transformers ollama datasets numpy tqdm transformers torch
 
 Run:
-  python benchmark_fullcpu.py
-  python benchmark_fullcpu.py --skip-rag           # skip concurrent RAG
-  python benchmark_fullcpu.py --skip-feeding        # skip data feeding test
-  python benchmark_fullcpu.py --quick               # small DB, fewer runs
-  python benchmark_fullcpu.py --output 9950x3d.json
+  python benchmark_full.py
+  python benchmark_full.py --skip-rag              # skip concurrent RAG
+  python benchmark_full.py --skip-feeding           # skip data feeding
+  python benchmark_full.py --quick                  # small DB, fewer runs
+  python benchmark_full.py --output 9950x3d.json
 """
 
 import argparse
@@ -39,7 +41,8 @@ from pathlib import Path
 
 import numpy as np
 
-# ── Variance Control ─────────────────────────────────────────────────────────
+
+# == Variance Control =========================================================
 
 def apply_variance_controls(verbose=True):
     controls = []
@@ -106,7 +109,7 @@ def restore_after_benchmark():
     gc.enable()
 
 
-# ── Dependency check ──────────────────────────────────────────────────────────
+# == Dependency check =========================================================
 
 def check_deps():
     missing = []
@@ -131,25 +134,23 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 import ollama as ollama_client
 
-# ── Config ────────────────────────────────────────────────────────────────────
+
+# == Config ===================================================================
 
 DEFAULT = {
     "embed_model": "all-MiniLM-L6-v2",
     "llm_model": "llama3.2",
     "db_sizes": [100_000, 500_000, 1_000_000],
-    "batch_queries": 300,       # queries per batch search
+    "batch_queries": 300,
     "top_k": 10,
     "hnsw_m": 32,
     "hnsw_ef": 64,
-    "warmup_batches": 5,        # warmup batches (discarded)
+    "warmup_batches": 5,
     "runs": 10,
     "trim": 0.05,
-    "rag_workers": None,        # None = auto (cpu_count, capped at 8)
+    "rag_workers": None,
     "rag_queries_per_worker": 20,
     "rag_runs": 5,
-    "embed_batch_size": 64,     # CPU embedding batch size
-    "embed_n_texts": 5000,      # texts to embed on CPU
-    "embed_runs": 5,
     "feeding_batch_size": 32,
     "feeding_n_batches": 200,
     "feeding_runs": 5,
@@ -162,7 +163,7 @@ CACHE_Q_FILE = "wiki_query_embeddings.npy"
 CACHE_TEXT_FILE = "wiki_passages.json"
 
 
-# ── Utils ─────────────────────────────────────────────────────────────────────
+# == Utils ====================================================================
 
 def get_cpu_info():
     if platform.system() == "Linux":
@@ -288,14 +289,17 @@ def get_gpu_info():
 def pct(data, p):
     return float(np.percentile(data, p, method="linear"))
 
+
 def ms(t):
     return round(t * 1000, 3)
+
 
 def trimmed_mean(values, trim=0.05):
     arr = sorted(values)
     cut = max(1, int(len(arr) * trim))
     trimmed = arr[cut:-cut] if cut > 0 and len(arr) > 2 * cut else arr
     return float(np.mean(trimmed))
+
 
 def trimmed_std(values, trim=0.05):
     arr = sorted(values)
@@ -304,7 +308,7 @@ def trimmed_std(values, trim=0.05):
     return float(np.std(trimmed))
 
 
-# ── Embedding Cache (shared with benchmark.py) ───────────────────────────────
+# == Embedding Cache (shared with benchmark.py) ===============================
 
 def load_or_build_embeddings(cfg, embed_model):
     cache_dir = Path(cfg["cache_dir"])
@@ -365,7 +369,7 @@ def load_or_build_embeddings(cfg, embed_model):
     return db_emb, q_emb, db_texts
 
 
-# ── Test 1: Batch Vector Search ──────────────────────────────────────────────
+# == Test 1: Batch Vector Search ==============================================
 
 def build_hnsw_index(db_emb, db_size, cfg):
     dim = db_emb.shape[1]
@@ -381,13 +385,14 @@ def build_hnsw_index(db_emb, db_size, cfg):
 def run_batch_vector_search(db_size, cfg, db_emb, q_emb):
     """
     Batch vector search: all CPU cores search simultaneously.
-    
+
     FAISS distributes N queries across OMP threads.
-    Each thread traverses HNSW independently → accesses its own
+    Each thread traverses HNSW independently, accessing its own
     region of the index in L3 cache.
-    
+
     With asymmetric CCD (e.g. 4585PX: 96MB + 32MB),
     threads on the smaller-cache CCD suffer more cache misses.
+    This is THE test that shows L3 contention across CCDs.
     """
     dim = db_emb.shape[1]
     n_runs = cfg["runs"]
@@ -397,7 +402,6 @@ def run_batch_vector_search(db_size, cfg, db_emb, q_emb):
     print(f"\n  DB size: {db_size:,} | batch: {n_batch} queries | "
           f"cores: {n_cores} | runs: {n_runs}")
 
-    # Use all cores
     faiss.omp_set_num_threads(n_cores)
 
     print("  Building HNSW index...", end=" ", flush=True)
@@ -406,7 +410,6 @@ def run_batch_vector_search(db_size, cfg, db_emb, q_emb):
     build_sec = time.perf_counter() - t0
     print(f"{build_sec:.1f}s")
 
-    # Prepare batch queries
     n_needed = n_batch * (n_runs + cfg["warmup_batches"])
     if n_needed <= len(q_emb):
         all_q = q_emb[:n_needed].copy()
@@ -415,7 +418,6 @@ def run_batch_vector_search(db_size, cfg, db_emb, q_emb):
         all_q = np.tile(q_emb, (repeats, 1))[:n_needed].copy()
     faiss.normalize_L2(all_q)
 
-    # Warmup
     print("  Warming up...", end=" ", flush=True)
     for i in range(cfg["warmup_batches"]):
         batch = all_q[i * n_batch:(i + 1) * n_batch]
@@ -462,43 +464,44 @@ def run_batch_vector_search(db_size, cfg, db_emb, q_emb):
     }
 
     cv = result["qps_stddev"] / result["qps"] * 100 if result["qps"] > 0 else 0
-    print(f"  → batch QPS: {result['qps']:,.1f} ±{result['qps_stddev']:.1f} "
+    print(f"  -> batch QPS: {result['qps']:,.1f} +/-{result['qps_stddev']:.1f} "
           f"(CV: {cv:.1f}%) | avg lat: {result['avg_latency_ms']:.3f}ms")
 
     del idx
     return result
 
 
-# ── Test 2: Concurrent RAG Pipeline ──────────────────────────────────────────
+# == Test 2: Concurrent RAG Pipeline =========================================
 
 def _rag_worker(args):
     """
     Single RAG worker process.
-    Each worker builds its own FAISS index, runs queries, returns timing.
-    Workers compete for L3 cache and memory bandwidth — realistic server load.
+    Each worker builds its own small FAISS index, runs queries, returns timing.
+    Workers compete for L3 cache and memory bandwidth.
     """
     worker_id, db_emb_path, q_emb_path, passages_path, cfg = args
 
     import faiss as faiss_local
     import ollama as ollama_local
 
-    # Memory-efficient: mmap the full file, copy only the small slice we need
     rag_db_size = 10_000
+
+    # Memory-efficient: mmap full file, copy only 10K slice
     db_mmap = np.load(db_emb_path, mmap_mode='r')
     vecs = db_mmap[:rag_db_size].copy()
-    del db_mmap  # release mmap handle
+    del db_mmap
 
     q_mmap = np.load(q_emb_path, mmap_mode='r')
     q_emb = q_mmap[:cfg["rag_queries_per_worker"]].copy()
     del q_mmap
 
-    # Load pre-sliced small passages file (only 10K entries, ~few MB)
+    # Load pre-sliced small passages file (only 10K entries)
     with open(passages_path) as f:
         passages = json.load(f)
+
     faiss_local.normalize_L2(vecs)
     dim = vecs.shape[1]
 
-    # Each worker uses 1 FAISS thread (parallelism is across workers)
     faiss_local.omp_set_num_threads(1)
 
     idx = faiss_local.IndexHNSWFlat(dim, 32)
@@ -546,28 +549,28 @@ def _rag_worker(args):
 def run_concurrent_rag(cfg, db_emb_path, q_emb_path, passages_path):
     """
     Concurrent RAG: multiple workers run full RAG pipelines in parallel.
-    Simulates real server load where multiple users query simultaneously.
-    
+
     Key difference from batch search:
     - Batch search = one process, many OMP threads, shared index
     - Concurrent RAG = many processes, each with own index + LLM call
-    - Tests memory bandwidth, L3 contention, and CPU↔GPU coordination
+    - Tests L3 cache competition between independent processes
     """
     n_workers = cfg["rag_workers"] or get_cpu_count()
-    n_workers = min(n_workers, 8)  # cap to avoid overwhelming ollama
-    
-    # Cap based on available memory (~500MB per worker for safety)
+    n_workers = min(n_workers, 8)
+
+    # Cap based on available memory
     mem = get_memory_info()
     if mem["total_gb"] > 0:
-        mem_cap = max(2, int(mem["total_gb"] / 2))  # ~2GB per worker
+        mem_cap = max(2, int(mem["total_gb"] / 2))
         n_workers = min(n_workers, mem_cap)
+
     n_runs = cfg["rag_runs"]
 
     print(f"\n  Workers: {n_workers} | "
           f"queries/worker: {cfg['rag_queries_per_worker']} | "
           f"runs: {n_runs}")
 
-    # Pre-slice passages to small temp file (avoids each worker loading full JSON)
+    # Pre-slice passages to small temp file to save worker memory
     import tempfile
     with open(passages_path) as f:
         all_passages = json.load(f)
@@ -644,8 +647,8 @@ def run_concurrent_rag(cfg, db_emb_path, q_emb_path, passages_path):
         "run_details": all_run_results,
     }
 
-    print(f"  → concurrent throughput: {result['throughput_qps']:.1f} req/s "
-          f"±{result['throughput_stddev']:.1f} | "
+    print(f"  -> concurrent throughput: {result['throughput_qps']:.1f} req/s "
+          f"+/-{result['throughput_stddev']:.1f} | "
           f"avg TTFT: {result['avg_ttft_ms']:.1f}ms")
 
     # Cleanup temp file
@@ -657,79 +660,15 @@ def run_concurrent_rag(cfg, db_emb_path, q_emb_path, passages_path):
     return result
 
 
-# ── Test 3: CPU Embedding Throughput ──────────────────────────────────────────
-
-def run_cpu_embedding(cfg, texts):
-    """
-    SentenceTransformer encoding on CPU only.
-    
-    Measures full pipeline: tokenization → transformer inference → pooling.
-    In edge/budget deployments without GPU, this IS the bottleneck.
-    L3 cache affects transformer layer performance (weight access patterns).
-    """
-    n_texts = min(cfg["embed_n_texts"], len(texts))
-    batch_size = cfg["embed_batch_size"]
-    n_runs = cfg["embed_runs"]
-    test_texts = texts[:n_texts]
-
-    print(f"\n  Texts: {n_texts:,} | batch: {batch_size} | runs: {n_runs}")
-
-    # Force CPU
-    model = SentenceTransformer(cfg["embed_model"], device="cpu")
-
-    # Warmup
-    print("  Warming up...", end=" ", flush=True)
-    model.encode(test_texts[:200], batch_size=batch_size,
-                 show_progress_bar=False, convert_to_numpy=True)
-    print("done")
-
-    run_throughput = []
-
-    for run_i in range(n_runs):
-        t0 = time.perf_counter()
-        model.encode(test_texts, batch_size=batch_size,
-                     show_progress_bar=False, convert_to_numpy=True,
-                     normalize_embeddings=True)
-        elapsed = time.perf_counter() - t0
-        tps = n_texts / elapsed
-        run_throughput.append(tps)
-
-        print(f"    run {run_i + 1}/{n_runs}  "
-              f"{tps:,.0f} texts/s  ({elapsed:.1f}s)")
-
-        if run_i < n_runs - 1:
-            time.sleep(2)
-
-    trim = cfg["trim"]
-    result = {
-        "n_texts": n_texts,
-        "batch_size": batch_size,
-        "runs": n_runs,
-        "device": "cpu",
-        "model": cfg["embed_model"],
-        "throughput_texts_per_s": round(trimmed_mean(run_throughput, trim), 1),
-        "throughput_stddev": round(trimmed_std(run_throughput, trim), 1),
-        "throughput_runs": [round(v, 1) for v in run_throughput],
-    }
-
-    cv = (result["throughput_stddev"] / result["throughput_texts_per_s"] * 100
-          if result["throughput_texts_per_s"] > 0 else 0)
-    print(f"  → {result['throughput_texts_per_s']:,.0f} texts/s "
-          f"±{result['throughput_stddev']:.0f} (CV: {cv:.1f}%)")
-
-    del model
-    return result
-
-
-# ── Test 4: Data Feeding Throughput ───────────────────────────────────────────
+# == Test 3: Data Feeding Throughput ==========================================
 
 def run_data_feeding(cfg, texts):
     """
-    CPU → GPU data feeding pipeline.
-    
-    Tokenize text on CPU → convert to tensors → transfer to GPU.
+    CPU -> GPU data feeding pipeline.
+
+    Tokenize text on CPU -> convert to tensors -> transfer to GPU.
     In LLM inference, slow tokenization = GPU starved = wasted GPU cycles.
-    
+
     L3 cache affects tokenizer vocabulary lookups and tensor allocation.
     """
     has_gpu = torch.cuda.is_available()
@@ -801,17 +740,17 @@ def run_data_feeding(cfg, texts):
 
     cv = (result["throughput_stddev"] / result["throughput_texts_per_s"] * 100
           if result["throughput_texts_per_s"] > 0 else 0)
-    print(f"  → {result['throughput_texts_per_s']:,.0f} texts/s "
-          f"±{result['throughput_stddev']:.0f} (CV: {cv:.1f}%)")
+    print(f"  -> {result['throughput_texts_per_s']:,.0f} texts/s "
+          f"+/-{result['throughput_stddev']:.0f} (CV: {cv:.1f}%)")
 
     return result
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# == Main =====================================================================
 
 def main():
     parser = argparse.ArgumentParser(
-        description="x3d-rag-benchmark — Full CPU Benchmark")
+        description="x3d-rag-benchmark - Full CPU Benchmark")
     parser.add_argument("--model", default=DEFAULT["llm_model"])
     parser.add_argument("--db-size", type=int, default=None)
     parser.add_argument("--runs", type=int, default=DEFAULT["runs"])
@@ -819,8 +758,6 @@ def main():
                         default=DEFAULT["batch_queries"])
     parser.add_argument("--skip-rag", action="store_true",
                         help="skip concurrent RAG test")
-    parser.add_argument("--skip-embedding", action="store_true",
-                        help="skip CPU embedding test")
     parser.add_argument("--skip-feeding", action="store_true",
                         help="skip data feeding test")
     parser.add_argument("--quick", action="store_true",
@@ -841,8 +778,6 @@ def main():
         cfg["db_sizes"] = [100_000]
         cfg["runs"] = min(cfg["runs"], 3)
         cfg["rag_runs"] = 2
-        cfg["embed_runs"] = 2
-        cfg["embed_n_texts"] = 1000
         cfg["feeding_runs"] = 2
         cfg["feeding_n_batches"] = 50
 
@@ -854,7 +789,7 @@ def main():
     now = datetime.now()
 
     print("\n" + "=" * 60)
-    print("  x3d-rag-benchmark — Full CPU Benchmark")
+    print("  x3d-rag-benchmark - Full CPU Benchmark")
     print("  github.com/sorrymannn/x3d-rag-benchmark")
     print("=" * 60)
     print(f"  CPU:     {cpu}")
@@ -864,7 +799,6 @@ def main():
     print(f"  GPU:     {gpu}")
     print(f"  Runs:    {cfg['runs']} (batch) / "
           f"{cfg['rag_runs']} (RAG) / "
-          f"{cfg['embed_runs']} (embed) / "
           f"{cfg['feeding_runs']} (feeding)")
     print(f"  Time:    {now.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -898,7 +832,6 @@ def main():
             "methodology": {
                 "batch_search": "FAISS OMP all-core parallel search",
                 "concurrent_rag": "multiprocessing, 1 FAISS thread/worker",
-                "cpu_embedding": "SentenceTransformer CPU-only inference",
                 "data_feeding": "tokenizer + GPU transfer throughput",
                 "trimmed_mean": f"top/bottom {int(cfg['trim']*100)}% dropped",
                 "inter_run_cooling": "2-3s",
@@ -907,13 +840,12 @@ def main():
         },
         "batch_vector_search": [],
         "concurrent_rag": None,
-        "cpu_embedding": None,
         "data_feeding": None,
     }
 
-    # ── Test 1: Batch Vector Search ──────────────────────────────────────
-    print(f"\n[1/4] Batch Vector Search (all {n_cores} cores)")
-    print("  FAISS HNSW — all OMP threads active")
+    # == Test 1: Batch Vector Search ==========================================
+    print(f"\n[1/3] Batch Vector Search (all {n_cores} cores)")
+    print("  FAISS HNSW - all OMP threads active")
     print("  CCD-level L3 cache contention visible here")
     print("-" * 60)
 
@@ -921,10 +853,10 @@ def main():
         output["batch_vector_search"].append(
             run_batch_vector_search(db_size, cfg, db_emb, q_emb))
 
-    # ── Test 2: Concurrent RAG ───────────────────────────────────────────
+    # == Test 2: Concurrent RAG ===============================================
     if not args.skip_rag:
-        print(f"\n[2/4] Concurrent RAG Pipeline")
-        print("  Multiple workers: search(CPU) → LLM(GPU) in parallel")
+        print(f"\n[2/3] Concurrent RAG Pipeline")
+        print("  Multiple workers: search(CPU) -> LLM(GPU) in parallel")
         print("-" * 60)
 
         try:
@@ -940,27 +872,18 @@ def main():
             print(f"  [SKIP] ollama model '{cfg['llm_model']}' not found")
             print(f"  Install: ollama pull {cfg['llm_model']}")
     else:
-        print("\n[2/4] Concurrent RAG — skipped (--skip-rag)")
+        print("\n[2/3] Concurrent RAG - skipped (--skip-rag)")
 
-    # ── Test 3: CPU Embedding ────────────────────────────────────────────
-    if not args.skip_embedding:
-        print(f"\n[3/4] CPU Embedding Throughput")
-        print("  SentenceTransformer on CPU — all cores via PyTorch")
-        print("-" * 60)
-        output["cpu_embedding"] = run_cpu_embedding(cfg, passages)
-    else:
-        print("\n[3/4] CPU Embedding — skipped (--skip-embedding)")
-
-    # ── Test 4: Data Feeding ─────────────────────────────────────────────
+    # == Test 3: Data Feeding =================================================
     if not args.skip_feeding:
-        print(f"\n[4/4] Data Feeding Throughput")
-        print("  Tokenize (CPU) → tensor transfer (GPU)")
+        print(f"\n[3/3] Data Feeding Throughput")
+        print("  Tokenize (CPU) -> tensor transfer (GPU)")
         print("-" * 60)
         output["data_feeding"] = run_data_feeding(cfg, passages)
     else:
-        print("\n[4/4] Data Feeding — skipped (--skip-feeding)")
+        print("\n[3/3] Data Feeding - skipped (--skip-feeding)")
 
-    # ── Save ─────────────────────────────────────────────────────────────
+    # == Save =================================================================
     restore_after_benchmark()
 
     out_path = (args.output or
@@ -986,16 +909,11 @@ def main():
               f"{r['throughput_qps']:>10.1f} req/s "
               f"({r['n_workers']} workers)")
 
-    if output["cpu_embedding"]:
-        r = output["cpu_embedding"]
-        print(f"  CPU Embedding:      "
-              f"{r['throughput_texts_per_s']:>10,.0f} texts/s")
-
     if output["data_feeding"]:
         r = output["data_feeding"]
         print(f"  Data Feeding:       "
               f"{r['throughput_texts_per_s']:>10,.0f} texts/s "
-              f"(→ {r['target_device']})")
+              f"(-> {r['target_device']})")
 
     print(f"\n  Saved: {out_path}")
     print("=" * 60)
