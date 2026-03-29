@@ -141,7 +141,7 @@ DEFAULT = {
     "embed_model": "all-MiniLM-L6-v2",
     "llm_model": "llama3.2",
     "db_sizes": [100_000, 500_000, 1_000_000],
-    "batch_queries": 300,
+    "batch_queries": 3000,        # fixed for fair comparison across CPUs
     "top_k": 10,
     "hnsw_m": 32,
     "hnsw_ef": 64,
@@ -396,9 +396,11 @@ def run_batch_vector_search(db_size, cfg, db_emb, q_emb):
     """
     dim = db_emb.shape[1]
     n_runs = cfg["runs"]
-    n_batch = cfg["batch_queries"]
     n_cores = get_cpu_count()
 
+    # Fixed batch size for fair cross-CPU comparison
+    n_batch = cfg["batch_queries"]
+    # Cap at available queries (will tile if needed anyway)
     print(f"\n  DB size: {db_size:,} | batch: {n_batch} queries | "
           f"cores: {n_cores} | runs: {n_runs}")
 
