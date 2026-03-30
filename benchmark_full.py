@@ -14,6 +14,8 @@ Tests:
      > L3 cache competition between independent workers
   3. Data Feeding Throughput  - Tokenizer > GPU tensor transfer rate
      > CPU preparation speed that determines GPU utilization
+  4. Index Build Time         - HNSW index construction from embeddings
+     > One-time setup cost users actually wait for
 
 Shares embedding cache with benchmark.py (./embedding_cache/)
 
@@ -24,6 +26,7 @@ Run:
   python benchmark_full.py
   python benchmark_full.py --skip-rag              # skip concurrent RAG
   python benchmark_full.py --skip-feeding           # skip data feeding
+  python benchmark_full.py --skip-build             # skip index build test
   python benchmark_full.py --quick                  # small DB, fewer runs
   python benchmark_full.py --output 9950x3d.json
 """
@@ -140,7 +143,7 @@ import ollama as ollama_client
 DEFAULT = {
     "embed_model": "all-MiniLM-L6-v2",
     "llm_model": "llama3.2",
-    "db_sizes": [100_000, 500_000, 1_000_000],
+    "db_sizes": [100_000, 500_000],
     "batch_queries": 3000,        # fixed for fair comparison across CPUs
     "top_k": 10,
     "hnsw_m": 32,
@@ -154,8 +157,9 @@ DEFAULT = {
     "feeding_batch_size": 32,
     "feeding_n_batches": 200,
     "feeding_runs": 5,
+    "build_runs": 5,
     "cache_dir": "./embedding_cache",
-    "n_passages": 1_100_000,
+    "n_passages": 600_000,
 }
 
 CACHE_DB_FILE = "wiki_db_embeddings.npy"
@@ -748,6 +752,73 @@ def run_data_feeding(cfg, texts):
     return result
 
 
+# == Test 4: Index Build Time =================================================
+
+def run_index_build(db_size, cfg, db_emb):
+    """
+    HNSW index construction benchmark.
+
+    This is the one-time cost a personal PC user actually waits for
+    when setting up a local RAG system. Building an HNSW graph requires
+    repeated nearest-neighbor searches during insertion, making it
+    heavily dependent on L3 cache capacity:
+    - Small index (100K): graph fits in L3 -> fast build
+    - Large index (1M): graph spills to DRAM -> build slows down
+    - More L3 cache -> larger index fits -> less slowdown
+
+    Unlike search QPS (which matters for concurrent users),
+    build time is directly felt by every single user.
+    """
+    n_runs = cfg["build_runs"]
+    n_cores = get_cpu_count()
+    dim = db_emb.shape[1]
+
+    print(f"\n  DB size: {db_size:,} | cores: {n_cores} | runs: {n_runs}")
+    faiss.omp_set_num_threads(n_cores)
+
+    build_times = []
+
+    for run_i in range(n_runs):
+        vecs = db_emb[:db_size].copy()
+        faiss.normalize_L2(vecs)
+
+        t0 = time.perf_counter()
+        idx = faiss.IndexHNSWFlat(dim, cfg["hnsw_m"])
+        idx.hnsw.efConstruction = 200
+        idx.add(vecs)
+        elapsed = time.perf_counter() - t0
+
+        build_times.append(elapsed)
+        print(f"    run {run_i + 1}/{n_runs}  {elapsed:.2f}s")
+
+        del idx
+        del vecs
+
+        if run_i < n_runs - 1:
+            time.sleep(2)
+
+    trim = cfg["trim"]
+    result = {
+        "db_size": db_size,
+        "cores_used": n_cores,
+        "hnsw_m": cfg["hnsw_m"],
+        "ef_construction": 200,
+        "runs": n_runs,
+        "build_time_s": round(trimmed_mean(build_times, trim), 2),
+        "build_time_stddev_s": round(trimmed_std(build_times, trim), 2),
+        "build_time_runs_s": [round(v, 2) for v in build_times],
+        "vectors_per_s": round(db_size / trimmed_mean(build_times, trim), 0),
+    }
+
+    cv = (result["build_time_stddev_s"] / result["build_time_s"] * 100
+          if result["build_time_s"] > 0 else 0)
+    print(f"  -> {result['build_time_s']:.2f}s "
+          f"+/-{result['build_time_stddev_s']:.2f} (CV: {cv:.1f}%) | "
+          f"{result['vectors_per_s']:,.0f} vectors/s")
+
+    return result
+
+
 # == Main =====================================================================
 
 def main():
@@ -762,6 +833,8 @@ def main():
                         help="skip concurrent RAG test")
     parser.add_argument("--skip-feeding", action="store_true",
                         help="skip data feeding test")
+    parser.add_argument("--skip-build", action="store_true",
+                        help="skip index build time test")
     parser.add_argument("--quick", action="store_true",
                         help="small DB, fewer runs")
     parser.add_argument("--output", default=None)
@@ -782,6 +855,7 @@ def main():
         cfg["rag_runs"] = 2
         cfg["feeding_runs"] = 2
         cfg["feeding_n_batches"] = 50
+        cfg["build_runs"] = 2
 
     cpu = get_cpu_info()
     gpu = get_gpu_info()
@@ -801,7 +875,8 @@ def main():
     print(f"  GPU:     {gpu}")
     print(f"  Runs:    {cfg['runs']} (batch) / "
           f"{cfg['rag_runs']} (RAG) / "
-          f"{cfg['feeding_runs']} (feeding)")
+          f"{cfg['feeding_runs']} (feeding) / "
+          f"{cfg['build_runs']} (build)")
     print(f"  Time:    {now.strftime('%Y-%m-%d %H:%M:%S')}")
 
     controls = apply_variance_controls()
@@ -835,6 +910,7 @@ def main():
                 "batch_search": "FAISS OMP all-core parallel search",
                 "concurrent_rag": "multiprocessing, 1 FAISS thread/worker",
                 "data_feeding": "tokenizer + GPU transfer throughput",
+                "index_build": "HNSW construction time (one-time setup cost)",
                 "trimmed_mean": f"top/bottom {int(cfg['trim']*100)}% dropped",
                 "inter_run_cooling": "2-3s",
                 "variance_controls": controls,
@@ -843,10 +919,11 @@ def main():
         "batch_vector_search": [],
         "concurrent_rag": None,
         "data_feeding": None,
+        "index_build": [],
     }
 
     # == Test 1: Batch Vector Search ==========================================
-    print(f"\n[1/3] Batch Vector Search (all {n_cores} cores)")
+    print(f"\n[1/4] Batch Vector Search (all {n_cores} cores)")
     print("  FAISS HNSW - all OMP threads active")
     print("  CCD-level L3 cache contention visible here")
     print("-" * 60)
@@ -857,7 +934,7 @@ def main():
 
     # == Test 2: Concurrent RAG ===============================================
     if not args.skip_rag:
-        print(f"\n[2/3] Concurrent RAG Pipeline")
+        print(f"\n[2/4] Concurrent RAG Pipeline")
         print("  Multiple workers: search(CPU) -> LLM(GPU) in parallel")
         print("-" * 60)
 
@@ -874,16 +951,29 @@ def main():
             print(f"  [SKIP] ollama model '{cfg['llm_model']}' not found")
             print(f"  Install: ollama pull {cfg['llm_model']}")
     else:
-        print("\n[2/3] Concurrent RAG - skipped (--skip-rag)")
+        print("\n[2/4] Concurrent RAG - skipped (--skip-rag)")
 
     # == Test 3: Data Feeding =================================================
     if not args.skip_feeding:
-        print(f"\n[3/3] Data Feeding Throughput")
+        print(f"\n[3/4] Data Feeding Throughput")
         print("  Tokenize (CPU) -> tensor transfer (GPU)")
         print("-" * 60)
         output["data_feeding"] = run_data_feeding(cfg, passages)
     else:
-        print("\n[3/3] Data Feeding - skipped (--skip-feeding)")
+        print("\n[3/4] Data Feeding - skipped (--skip-feeding)")
+
+    # == Test 4: Index Build Time =============================================
+    if not args.skip_build:
+        print(f"\n[4/4] Index Build Time")
+        print("  HNSW construction - one-time setup cost")
+        print("  L3 cache capacity determines build speed at scale")
+        print("-" * 60)
+
+        for db_size in cfg["db_sizes"]:
+            output["index_build"].append(
+                run_index_build(db_size, cfg, db_emb))
+    else:
+        print("\n[4/4] Index Build - skipped (--skip-build)")
 
     # == Save =================================================================
     restore_after_benchmark()
@@ -916,6 +1006,14 @@ def main():
         print(f"  Data Feeding:       "
               f"{r['throughput_texts_per_s']:>10,.0f} texts/s "
               f"(-> {r['target_device']})")
+
+    if output["index_build"]:
+        for r in output["index_build"]:
+            cv = (r["build_time_stddev_s"] / r["build_time_s"] * 100
+                  if r["build_time_s"] > 0 else 0)
+            print(f"  Index Build {r['db_size']//1000}K:  "
+                  f"{r['build_time_s']:>10.2f}s  "
+                  f"({r['vectors_per_s']:,.0f} vec/s, CV: {cv:.1f}%)")
 
     print(f"\n  Saved: {out_path}")
     print("=" * 60)
