@@ -7,54 +7,76 @@
 ![FAISS](https://img.shields.io/badge/Meta-FAISS-blue.svg)
 ![HuggingFace](https://img.shields.io/badge/HuggingFace-sentence--transformers-orange.svg)
 
-An open-source benchmark measuring the impact of CPU cache and architecture
-on RAG AI pipelines. Works with any x86 CPU (AMD, Intel).
+An open-source benchmark for measuring how CPU cache and architecture affect
+graph-based vector search and related stages in local/on-prem RAG pipelines.
+Works with any x86 CPU (AMD, Intel).
+
+This benchmark targets personal-PC and small-team, single-node setups
+(roughly 100K–200K vectors). It is not intended to represent large-scale,
+distributed vector database services.
 
 ---
 
-## Why X3D Has an Advantage in RAG
+## Why CPU Cache Can Matter in Graph-Based Vector Search
 
-Vector Search — the CPU's core task in RAG pipelines — is bottlenecked by
-Random Memory Access Pattern. X3D V-Cache's large L3 cache (96MB) provides
-a performance advantage through the same mechanism that makes it strong in gaming.
+In graph-based ANN search such as HNSW, query performance can be sensitive to
+cache behavior because traversal involves irregular memory accesses. Each hop
+in the graph may reference a different region of memory, and whether that data
+is in L3 cache (~4ns) or must be fetched from DRAM (~70ns) can affect throughput.
 
 ```
-RAG Pipeline:
+Typical RAG pipeline:
 
   User query
       ↓
-  Embedding generation   (GPU)
+  Embedding generation   (offline, or CPU/GPU)
       ↓
-  Vector Search          (CPU) ← L3 cache effect
+  Vector Search          (CPU) ← cache-sensitive in graph-based ANN
       ↓
   LLM generation         (GPU)
       ↓
   Response
-
-Vector Search characteristics:
-  - Randomly traverses HNSW graph nodes
-  - Each traversal accesses a different memory address (Random Access)
-  - Larger L3 cache → higher cache hit rate → lower latency
 ```
+
+A larger L3 cache (e.g. X3D V-Cache) can keep more of the HNSW graph resident,
+potentially reducing DRAM accesses during search. This benchmark measures
+whether and how much that difference shows up in practice.
 
 ---
 
-## Supported CPUs
+## Benchmark Scripts
 
-Any x86 CPU supported by FAISS can be tested. The benchmark automatically detects CPU model, L3 cache size, and available instruction sets.
+| Script | Purpose | Key Metrics |
+|---|---|---|
+| **benchmark.py** | Full multi-core CPU benchmark (main) | Batch QPS, Index Build, Concurrent RAG, Data Feeding |
+| **benchmark_single.py** | Single-core vector search + RAG TTFT (lightweight) | Single-thread QPS, Latency P50/P95/P99, RAG TTFT |
 
-Example tested configurations include AMD Ryzen X3D (96MB L3), AMD Ryzen non-X3D (32MB L3), and Intel Core Ultra series.
+| Compare Script | For |
+|---|---|
+| **compare.py** | benchmark.py results (6-chart: QPS, Build, RAG) |
+| **compare_single.py** | benchmark_single.py results (3-chart: QPS, Latency, RAG) |
 
 ---
 
 ## What We Measure
 
+### benchmark.py (main)
+
+| Metric | Description | Scenario |
+|---|---|---|
+| **Batch Vector Search QPS** | All-core FAISS HNSW throughput | Multi-user / parallel retrieval |
+| **Index Build Time** | HNSW construction from embeddings | One-time setup cost |
+| **Concurrent RAG Throughput** | 8 workers: search(CPU) → LLM(GPU) | Shared RAG environment |
+| **Concurrent RAG TTFT** | Time to first token under concurrency | User-perceived latency |
+| **Data Feeding Throughput** | Tokenize(CPU) → GPU transfer rate | GPU utilization |
+
+### benchmark_single.py (lightweight)
+
 | Metric | Description | Cache Impact |
 |---|---|---|
-| Vector Search QPS | FAISS HNSW queries per second | **Direct** |
-| Vector Search P99 Latency | Worst-case search latency | **Direct** |
-| Latency Distribution | P50 / P95 / P99 breakdown | **Direct** |
-| RAG TTFT | Time to first token (full pipeline) | Indirect |
+| **Vector Search QPS** | Single-thread FAISS HNSW queries/sec | **Direct** |
+| **Vector Search Latency** | P50 / P95 / P99 breakdown | **Direct** |
+| **RAG TTFT** | Time to first token (full pipeline) | Indirect |
 
 ---
 
@@ -65,12 +87,22 @@ Designed for reproducible, low-variance results:
 | Design Choice | Reason |
 |---|---|
 | **Real Wikipedia embeddings** | Clusters by topic → stable HNSW traversal paths vs random vectors |
-| **Configurable FAISS threads** | Default: all cores (auto). Use `--threads 1` if CV > 3% |
-| **Trimmed mean** (drop outliers) | With 5 runs: drops 1 high + 1 low; with 10+: ~5% each side |
+| **Trimmed mean** (drop outliers) | With 10 runs: ~5% each side dropped |
 | **Embedding cache** | Same vectors reused across runs and machines |
 | **OS-level variance controls** | CPU governor, NUMA, THP, process priority (auto-applied) |
 | **Inter-run cooling** | 2s delay between runs prevents thermal drift |
 | **Python GC disabled** | No garbage collection during measurement |
+
+### DB Sizes
+
+| Size | Suggested scenario | Notes |
+|---|---|---|
+| **100K vectors** | Personal RAG / small-team shared RAG | Suitable for single-user or modest shared knowledge bases |
+| **200K vectors** | Small-team shared RAG / broader local knowledge base | Better for wider document coverage on a single node |
+
+> These are rough usage tiers, not hard limits.
+> Actual document/page coverage depends heavily on chunking strategy,
+> chunk size, overlap, and document density.
 
 ### Recommended Environment
 
@@ -84,17 +116,16 @@ For lowest variance, **Linux native** (not WSL) is recommended:
 # - Process priority: nice -20
 ```
 
-Windows is also supported but P99 may show higher variance due to OS interrupts.
-
+Windows is also supported but may show higher variance due to OS interrupts.
 
 ### CV Quality Thresholds
 
 | CV% | Rating | Action |
 |---|---|---|
-| ≤ 2% | **EXCELLENT** | Very stable, publication quality |
-| ≤ 3% | **GOOD** | Reliable for comparison |
-| ≤ 5% | **OK** | Acceptable |
-| > 5% | **NOISY** | Try `--threads 1` or reboot |
+| ≤ 2% | **Excellent** | Stable, good for comparison |
+| ≤ 3% | **Good** | Reliable for internal comparison |
+| ≤ 5% | **Acceptable** | Usable with caveats |
+| > 5% | **Noisy** | Try reducing background processes or reboot |
 
 ---
 
@@ -123,9 +154,12 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-> **Note for Windows**: `faiss-cpu` installs directly via pip. No build tools required.
+> `faiss-cpu` is available on PyPI and typically installs without issues on
+> Linux, macOS, and Windows. If you encounter problems, see the
+> [FAISS installation guide](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md)
+> for alternative methods including conda.
 
-### 3. ollama + LLM model (only needed for RAG TTFT)
+### 3. ollama + LLM model (needed for Concurrent RAG / RAG TTFT)
 
 **Linux:**
 ```bash
@@ -139,78 +173,86 @@ ollama pull llama3.2
 ollama pull llama3.2
 ```
 
-> RAG TTFT measurement is optional. Vector Search benchmark runs without ollama.
+> Concurrent RAG and RAG TTFT require ollama. Vector Search and Index Build benchmarks run without it.
 
 ---
 
 ## Usage
 
+### benchmark.py (main — full multi-core)
+
 **Linux / macOS:**
 ```bash
-# Vector Search only (no ollama needed, ~30-45 min)
-python3 benchmark.py --skip-rag --output 9850x3d.json  # use your CPU name
+# Full benchmark (~20-30 min)
+python3 benchmark.py --output 9850x3d.json
 
-# Full benchmark (Vector Search + RAG TTFT)
-python3 benchmark.py --output 9850x3d.json  # use your CPU name
-
-# Quick test (~5 min)
-python3 benchmark.py --quick --skip-rag
-```
-
-**Linux / macOS (Using taskset):**
-```bash
-# Vector Search only (no ollama needed, ~30-45 min)
-taskset -c 0 python3 benchmark.py --skip-rag --threads 1 --output 9850x3d.json  # use your CPU name
-
-# Full benchmark (Vector Search + RAG TTFT)
-taskset -c 0 python3 benchmark.py --threads 1 --output 9850x3d.json  # use your CPU name
+# Skip Concurrent RAG (no ollama needed)
+python3 benchmark.py --skip-rag --output 9850x3d.json
 
 # Quick test (~5 min)
-taskset -c 0 python3 benchmark.py --quick --skip-rag --threads 1
+python3 benchmark.py --quick --output test.json
 ```
-taskset pins the process to a specific CPU core, reducing scheduling noise and improving benchmark consistency.
-
 
 **Windows:**
+
+> **Note:** On Windows, use `python` instead of `python3` (e.g., `python benchmark.py --output 9700x.json`).
+
 ```powershell
-python benchmark.py --skip-rag --output 9850x3d.json  # use your CPU name
-python benchmark.py --output 9850x3d.json  # use your CPU name
-python benchmark.py --quick --skip-rag
+python benchmark.py --output 9850x3d.json
+python benchmark.py --skip-rag --output 9850x3d.json
+python benchmark.py --quick --output test.json
 ```
 
-### Options
+#### Options
 
 | Option | Default | Description |
 |---|---|---|
-| `--runs N` | 5 | Number of runs to average |
-| `--skip-rag` | off | Skip RAG TTFT, run Vector Search only |
-| `--quick` | off | Small DB only, 3 runs |
+| `--runs N` | 10 | Number of runs for batch search |
+| `--skip-rag` | off | Skip concurrent RAG test |
+| `--skip-feeding` | off | Skip data feeding test |
+| `--skip-build` | off | Skip index build test |
+| `--quick` | off | Small DB only, fewer runs |
 | `--output FILE` | auto | Save results to specified JSON file |
-| `--model NAME` | llama3.2 | ollama model for RAG TTFT |
-| `--queries N` | 300 | Number of queries per run |
+| `--model NAME` | llama3.2 | ollama model for RAG |
 | `--db-size N` | - | Override DB size (single value) |
 | `--cache-dir PATH` | ./embedding_cache | Embedding cache directory |
-| `--rebuild` | off | Force rebuild embedding cache |
-| `--threads N` | 0 (auto) | FAISS threads: 0=all cores, 1=single-threaded |
+
+### benchmark_single.py (lightweight — single-core)
+
+```bash
+# Vector Search only (no ollama needed)
+python3 benchmark_single.py --skip-rag --output 9850x3d_single.json
+
+# Full benchmark (Vector Search + RAG TTFT)
+python3 benchmark_single.py --output 9850x3d_single.json
+
+# Single-threaded for maximum stability
+python3 benchmark_single.py --threads 1 --skip-rag --output 9850x3d_single.json
+```
 
 ---
 
 ## Compare Results
 
-Compare 2-6 CPU results in a single chart.
+### benchmark.py results (6-chart)
 
 ```bash
-# 2 CPUs
-python3 compare.py 9700x.json 9850x3d.json
-
-# 4 CPUs
-python3 compare.py 9850x3d.json 9700x.json 285k.json 265k.json
+# Compare 2-8 CPUs
+python3 compare.py 9950x3d2.json 9850x3d.json 9700x.json 285k.json 265k.json
 
 # Custom output filename
 python3 compare.py *.json --output my_comparison.png
 ```
 
-Outputs `comparison.png` with 3 charts: QPS (500K/1000K), Search Latency (P50/P95), RAG Pipeline (P50/P95). Percentage labels show difference vs the first CPU.
+Outputs `comparison.png` with 6 charts: QPS (100K/200K), Index Build (100K/200K), Concurrent RAG Throughput, Concurrent RAG TTFT. Percentage labels show difference vs the first CPU.
+
+### benchmark_single.py results (3-chart)
+
+```bash
+python3 compare_single.py 9850x3d_single.json 9700x_single.json 285k_single.json
+```
+
+Outputs `comparison.png` with 3 charts: QPS, Search Latency (P50/P95), RAG Pipeline Latency.
 
 ---
 
@@ -220,13 +262,13 @@ For a fair comparison, use **identical embedding vectors** on all CPUs.
 
 ```bash
 # Generate on first machine
-python3 benchmark.py --output cpu_a.json  # name after your CPU
+python3 benchmark.py --output cpu_a.json
 
 # Copy cache to second machine
 scp -r ./embedding_cache/ user@other-machine:~/x3d-rag-benchmark/
 
 # Run on second machine (loads from cache instantly)
-python3 benchmark.py --output cpu_b.json  # name after your CPU
+python3 benchmark.py --output cpu_b.json
 ```
 
 > Embedding cache is cross-platform compatible (numpy `.npy` files).
@@ -241,6 +283,7 @@ python3 benchmark.py --output cpu_b.json  # name after your CPU
 | sentence-transformers | HuggingFace | Embedding model |
 | ollama | Ollama | Local LLM server |
 | datasets | HuggingFace | Wikipedia dataset |
+| transformers | HuggingFace | Tokenizer (data feeding test) |
 
 ---
 
@@ -251,7 +294,7 @@ python3 benchmark.py --output cpu_b.json  # name after your CPU
 - Reboot before benchmarking (recommended)
 - Use identical RAM capacity and speed
 - Use identical GPU
-- Use `--runs 10` or higher for publication-quality results
+- Use `--runs 10` or higher for stable results
 - Share `embedding_cache/` between machines for fair comparison
 
 ### BIOS Settings (recommended)
