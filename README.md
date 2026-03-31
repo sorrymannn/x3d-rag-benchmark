@@ -9,7 +9,7 @@
 
 An open-source benchmark for measuring how CPU cache and architecture affect
 graph-based vector search and related stages in local/on-prem RAG pipelines.
-Works with any x86 CPU (AMD, Intel).
+Designed for x86 CPUs (tested on AMD and Intel systems).
 
 This benchmark targets personal-PC and small-team, single-node setups
 (roughly 100K–200K vectors). It is not intended to represent large-scale,
@@ -22,7 +22,7 @@ distributed vector database services.
 In graph-based ANN search such as HNSW, query performance can be sensitive to
 cache behavior because traversal involves irregular memory accesses. Each hop
 in the graph may reference a different region of memory, and whether that data
-is in L3 cache (~4ns) or must be fetched from DRAM (~70ns) can affect throughput.
+is in L3 cache or must be fetched from DRAM can materially affect throughput.
 
 ```
 Typical RAG pipeline:
