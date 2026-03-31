@@ -123,6 +123,10 @@ def plot_bars(ax, datasets, labels, get_val, title, ylabel, higher_better=True,
 
     ax.bar(x, vals, 0.65, color=colors, alpha=0.92, edgecolor="white", linewidth=0.3)
 
+    # Add top margin so value + diff labels don't get clipped
+    max_val = max(vals)
+    ax.set_ylim(top=max_val * 1.25)
+
     base = vals[0]
     for i in range(n):
         if fmt_fn:
@@ -160,16 +164,16 @@ def main():
         l3 = get_l3(d)
         labels.append(f"{name}\n({l3})" if l3 else name)
 
-    fig = plt.figure(figsize=(24, 14))
+    fig = plt.figure(figsize=(24, 16))
     fig.patch.set_facecolor(BG)
 
     fig.suptitle(
         "x3d-rag-benchmark  —  Full CPU Benchmark for RAG AI Pipeline\n"
         "Personal PC & small-team on-premises RAG (100K–200K vectors, single-node)",
-        color=TEXT, fontsize=14, fontweight="bold", y=0.98
+        color=TEXT, fontsize=14, fontweight="bold", y=0.99
     )
 
-    gs = fig.add_gridspec(3, 2, left=0.06, right=0.97, top=0.90, bottom=0.08,
+    gs = fig.add_gridspec(3, 2, left=0.06, right=0.97, top=0.86, bottom=0.06,
                           wspace=0.22, hspace=0.40)
 
     ax1 = fig.add_subplot(gs[0, 0])
@@ -223,9 +227,9 @@ def main():
     from matplotlib.patches import Patch
     handles = [Patch(facecolor=COLORS[i % len(COLORS)], label=labels[i].replace("\n", " "))
                for i in range(len(datasets))]
-    fig.legend(handles=handles, loc="upper center", ncol=min(len(datasets), 4),
-               bbox_to_anchor=(0.5, 0.935), facecolor=PANEL, labelcolor=TEXT,
-               fontsize=10, framealpha=0.95, edgecolor=GRID)
+    fig.legend(handles=handles, loc="upper center", ncol=min(len(datasets), 7),
+               bbox_to_anchor=(0.5, 0.92), facecolor=PANEL, labelcolor=TEXT,
+               fontsize=9, framealpha=0.95, edgecolor=GRID)
 
     # Footer
     parts = []
