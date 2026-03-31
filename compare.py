@@ -10,7 +10,7 @@ compare.py
   6. Concurrent RAG Avg TTFT (ms)
 
 Usage:
-  python compare.py 9950x3d2.json 9850x3d.json 9700x.json 285k.json
+  python compare.py 9850x3d.json 9700x.json 285k.json 270kplus.json 265k.json
   python compare.py *.json --output comparison.png
 """
 
@@ -70,14 +70,19 @@ def val_label(ax, x, y, text, color=TEXT, fontsize=9, pt_offset=6):
 
 
 def diff_label(ax, x, y, val, base, higher_better=True, fontsize=8, pt_offset=18):
-    if base == 0:
+    """Show how much better the FIRST CPU (base) is compared to this CPU."""
+    if val == 0:
         return
-    pct = (val - base) / base * 100
+    if higher_better:
+        pct = (base - val) / val * 100  # e.g. base=81193, val=34692 → +134%
+    else:
+        pct = (val - base) / base * 100  # e.g. base=2.49, val=5.92 → +138% (slower)
+
     sign = "+" if pct > 0 else ""
     if higher_better:
         color = DIFF_BETTER if pct > 0 else DIFF_WORSE
     else:
-        color = DIFF_BETTER if pct < 0 else DIFF_WORSE
+        color = DIFF_WORSE if pct > 0 else DIFF_BETTER
     from matplotlib.transforms import offset_copy
     trans = offset_copy(ax.transData, fig=ax.figure, x=0, y=pt_offset, units="points")
     ax.text(x, y, f"{sign}{pct:.0f}%", ha="center", va="bottom", color=color,
