@@ -1,6 +1,6 @@
 """
 x3d-rag-benchmark
-=================
+==================
 AMD Ryzen X3D V-Cache vs non-X3D CPU performance benchmark
 for RAG AI pipelines
 
