@@ -219,7 +219,7 @@ def main():
               lambda d: d["concurrent_rag"]["throughput_qps"] if d.get("concurrent_rag") else None,
               "Concurrent RAG throughput — 8 workers (higher = better)",
               "req/s", higher_better=True,
-              fmt_fn=lambda v: f"{v:.1f}")
+              fmt_fn=lambda v: f"{v:.1f} req/s")
 
     # 6. Concurrent RAG TTFT
     plot_bars(ax6, datasets, labels,
